@@ -27,7 +27,7 @@ import CategoryManager from "./components/CategoryManager";
 import BrandLogo from "./components/BrandLogo";
 
 export default function App() {
-  // Sync state stores with LocalStorage
+  // Sync state stores with LocalStorage & Server
   const [guidelines, setGuidelines] = useState<Guideline[]>(() => {
     const local = localStorage.getItem("rams_guidelines");
     return local ? JSON.parse(local) : INITIAL_GUIDELINES;
@@ -37,6 +37,9 @@ export default function App() {
     const local = localStorage.getItem("rams_categories");
     return local ? JSON.parse(local) : INITIAL_CATEGORIES;
   });
+
+  const [isLoadedFromServer, setIsLoadedFromServer] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -61,18 +64,153 @@ export default function App() {
   // Dynamic division load rate (each added guideline contributes 1% up to 100%, starting from 0%)
   const divisionLoad = Math.min(100, guidelines.length * 1);
 
-  // Auto save database backups inside local scope
+  // 1. Fetch initial data from server on component mount
   useEffect(() => {
-    localStorage.setItem("rams_guidelines", JSON.stringify(guidelines));
-  }, [guidelines]);
+    let active = true;
+    const loadFromServerSharedStore = async () => {
+      try {
+        setIsSyncing(true);
+        const [resGuidelines, resCategories] = await Promise.all([
+          fetch("/api/guidelines").then(r => r.json()),
+          fetch("/api/categories").then(r => r.json())
+        ]);
 
-  useEffect(() => {
-    localStorage.setItem("rams_categories", JSON.stringify(categories));
-  }, [categories]);
+        if (!active) return;
 
+        const hasGuidelinesOnServer = Array.isArray(resGuidelines) && resGuidelines.length > 0;
+        const hasCategoriesOnServer = Array.isArray(resCategories) && resCategories.length > 0;
+
+        let finalGuidelines = resGuidelines;
+        let finalCategories = resCategories;
+
+        // Migrate local guidelines and categories to server if server is empty
+        const localGStr = localStorage.getItem("rams_guidelines");
+        const localGuidelines = localGStr ? JSON.parse(localGStr) : [];
+        const localCStr = localStorage.getItem("rams_categories");
+        const localCategories = localCStr ? JSON.parse(localCStr) : [];
+
+        if (!hasGuidelinesOnServer && localGuidelines.length > 0) {
+          await fetch("/api/guidelines", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ guidelines: localGuidelines })
+          });
+          finalGuidelines = localGuidelines;
+        }
+
+        if (!hasCategoriesOnServer && localCategories.length > 0) {
+          await fetch("/api/categories", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ categories: localCategories })
+          });
+          finalCategories = localCategories;
+        }
+
+        if (Array.isArray(finalGuidelines)) {
+          setGuidelines(finalGuidelines);
+        }
+        if (Array.isArray(finalCategories)) {
+          setCategories(finalCategories);
+        }
+
+        setIsLoadedFromServer(true);
+      } catch (err) {
+        console.error("Unable to load initial shared store data:", err);
+      } finally {
+        if (active) {
+          setIsSyncing(false);
+        }
+      }
+    };
+
+    loadFromServerSharedStore();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // 2. Clear state-listening useEffects that were triggering race-condition overwrites.
+  // Instead, save to local backup backup as an immediate secondary layer.
   useEffect(() => {
     localStorage.setItem("rams_bookmarks", JSON.stringify(bookmarkedIds));
   }, [bookmarkedIds]);
+
+  // Dynamic persistence helpers
+  const persistGuidelines = async (updatedGuidelines: Guideline[]) => {
+    try {
+      await fetch("/api/guidelines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guidelines: updatedGuidelines })
+      });
+    } catch (err) {
+      console.error("Failed to sync guidelines with shared database:", err);
+    }
+  };
+
+  const persistCategories = async (updatedCategories: Category[]) => {
+    try {
+      await fetch("/api/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ categories: updatedCategories })
+      });
+    } catch (err) {
+      console.error("Failed to sync categories with shared database:", err);
+    }
+  };
+
+  // Gentle background auto-polling to keep other accounts/tabs perfectly in sync without manual refresh
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        // Only run background sync if the user is not actively editing or creating to prevent form disruption
+        if (isEditingGuideline || isCreatingGuideline) return;
+        
+        const [resGuidelines, resCategories] = await Promise.all([
+          fetch("/api/guidelines").then(r => r.json()),
+          fetch("/api/categories").then(r => r.json())
+        ]);
+        
+        if (Array.isArray(resGuidelines)) {
+          setGuidelines(resGuidelines);
+          localStorage.setItem("rams_guidelines", JSON.stringify(resGuidelines));
+        }
+        if (Array.isArray(resCategories)) {
+          setCategories(resCategories);
+          localStorage.setItem("rams_categories", JSON.stringify(resCategories));
+        }
+      } catch (err) {
+        console.error("Background auto-sync failed:", err);
+      }
+    }, 15000); // Poll every 15 seconds
+
+    return () => clearInterval(interval);
+  }, [isEditingGuideline, isCreatingGuideline]);
+
+  // General direct fetch trigger for manual Sync Now triggers
+  const handleForceSyncWithServer = async () => {
+    try {
+      setIsSyncing(true);
+      const [resGuidelines, resCategories] = await Promise.all([
+        fetch("/api/guidelines").then(r => r.json()),
+        fetch("/api/categories").then(r => r.json())
+      ]);
+      if (Array.isArray(resGuidelines)) {
+        setGuidelines(resGuidelines);
+        localStorage.setItem("rams_guidelines", JSON.stringify(resGuidelines));
+      }
+      if (Array.isArray(resCategories)) {
+        setCategories(resCategories);
+        localStorage.setItem("rams_categories", JSON.stringify(resCategories));
+      }
+    } catch (err) {
+      console.error("Failed to manually sync with server database:", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Handle toggling of favorite states
   const handleToggleBookmark = (id: string, e: React.MouseEvent) => {
@@ -82,47 +220,88 @@ export default function App() {
     );
   };
 
-  // Create new procedure card
+  // Create new procedure card - write-through directly to server
   const handleCreateGuideline = (newGuideline: Guideline) => {
-    setGuidelines(prev => [newGuideline, ...prev]);
+    const updated = [newGuideline, ...guidelines];
+    setGuidelines(updated);
+    localStorage.setItem("rams_guidelines", JSON.stringify(updated));
+    persistGuidelines(updated);
+
     setIsCreatingGuideline(false);
     setSelectedGuidelineId(newGuideline.id); // open newly created guide immediately
   };
 
-  // Modify currently selected guideline card
+  // Modify currently selected guideline card - write-through directly to server
   const handleEditGuideline = (updatedGuideline: Guideline) => {
-    setGuidelines(prev => prev.map(g => g.id === updatedGuideline.id ? updatedGuideline : g));
+    const updated = guidelines.map(g => g.id === updatedGuideline.id ? updatedGuideline : g);
+    setGuidelines(updated);
+    localStorage.setItem("rams_guidelines", JSON.stringify(updated));
+    persistGuidelines(updated);
+
     setIsEditingGuideline(false);
   };
 
-  // Delete guideline permanent action
+  // Delete guideline permanent action - write-through directly to server
   const handleDeleteGuideline = (id: string) => {
     if (confirm("Are you sure you want to permanently delete this guidelines procedural card from the catalog? This is irreversible.")) {
-      setGuidelines(prev => prev.filter(g => g.id !== id));
+      const updated = guidelines.filter(g => g.id !== id);
+      setGuidelines(updated);
+      localStorage.setItem("rams_guidelines", JSON.stringify(updated));
+      persistGuidelines(updated);
+
       setSelectedGuidelineId(null);
     }
   };
 
   // Trigger default recovery resetting seed data if the guidelines repository becomes empty
-  const handleResetCatalogToSeeds = () => {
+  const handleResetCatalogToSeeds = async () => {
     if (confirm("Reset current procedures catalog and custom categories back to master template seeds? This deletes custom items.")) {
-      setGuidelines(INITIAL_GUIDELINES);
-      setCategories(INITIAL_CATEGORIES);
-      setSelectedCategory(null);
-      setSearchQuery("");
-      setBookmarkedIds([]);
-      setSelectedGuidelineId(null);
-      setIsEditingGuideline(false);
-      setIsCreatingGuideline(false);
+      try {
+        setIsSyncing(true);
+        const res = await fetch("/api/reset", { method: "POST" }).then(r => r.json());
+        if (res.success) {
+          setGuidelines(res.guidelines || []);
+          setCategories(res.categories || INITIAL_CATEGORIES);
+          localStorage.setItem("rams_guidelines", JSON.stringify(res.guidelines || []));
+          localStorage.setItem("rams_categories", JSON.stringify(res.categories || INITIAL_CATEGORIES));
+        } else {
+          setGuidelines(INITIAL_GUIDELINES);
+          setCategories(INITIAL_CATEGORIES);
+          localStorage.setItem("rams_guidelines", JSON.stringify(INITIAL_GUIDELINES));
+          localStorage.setItem("rams_categories", JSON.stringify(INITIAL_CATEGORIES));
+        }
+        setSelectedCategory(null);
+        setSearchQuery("");
+        setBookmarkedIds([]);
+        setSelectedGuidelineId(null);
+        setIsEditingGuideline(false);
+        setIsCreatingGuideline(false);
+      } catch (err) {
+        console.error("Error resetting catalog to seeds:", err);
+        // Fallback
+        setGuidelines(INITIAL_GUIDELINES);
+        setCategories(INITIAL_CATEGORIES);
+        localStorage.setItem("rams_guidelines", JSON.stringify(INITIAL_GUIDELINES));
+        localStorage.setItem("rams_categories", JSON.stringify(INITIAL_CATEGORIES));
+      } finally {
+        setIsSyncing(false);
+      }
     }
   };
 
   const handleCreateCategory = (newCat: Category) => {
-    setCategories(prev => [...prev, newCat]);
+    const updated = [...categories, newCat];
+    setCategories(updated);
+    localStorage.setItem("rams_categories", JSON.stringify(updated));
+    persistCategories(updated);
   };
 
   const handleDeleteCategory = (catId: string) => {
-    setCategories(prev => prev.filter(c => c.id !== catId));
+    const updated = categories.filter(c => c.id !== catId);
+    setCategories(updated);
+    localStorage.setItem("rams_categories", JSON.stringify(updated));
+    persistCategories(updated);
+
     if (selectedCategory === catId) {
       setSelectedCategory(null);
     }
@@ -303,6 +482,10 @@ export default function App() {
                       </span>
                       <span className="px-2.5 py-1 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg text-[10px] font-mono uppercase tracking-wider font-semibold">
                         ROLE: {currentRole}
+                      </span>
+                      <span className="px-2.5 py-1 bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-lg text-[10px] font-semibold flex items-center gap-1 uppercase tracking-wider">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        SHARED PERSISTENCE
                       </span>
                     </div>
                     <div className="flex items-center gap-3">
@@ -496,6 +679,19 @@ export default function App() {
                 </div>
 
                 <div className="flex gap-2 items-center">
+                  <button
+                    id="btn-sync-shared-database"
+                    onClick={handleForceSyncWithServer}
+                    className={`flex items-center gap-1 px-3 py-2 text-indigo-700 font-sans font-semibold text-xs rounded-lg border border-indigo-200 transition-colors cursor-pointer ${
+                      isSyncing ? "bg-indigo-50 animate-pulse" : "bg-indigo-50 hover:bg-indigo-100"
+                    }`}
+                    title="Load latest updates from the shared cloud database instantly"
+                    type="button"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+                    {isSyncing ? "Syncing DB..." : "Sync DB"}
+                  </button>
+
                   <button
                     id="btn-recover-seed-catalog"
                     onClick={handleResetCatalogToSeeds}

@@ -12,11 +12,139 @@ import dotenv from "dotenv";
 // Load environment variables
 dotenv.config();
 
+import fs from "fs";
+
 const app = express();
 const PORT = 3000;
 
 // Middleware
 app.use(express.json());
+
+// Default data seeds to instantiate on the shared backend if no store file exists.
+const DEFAULT_CATEGORIES = [
+  {
+    id: "physical-archiving",
+    name: "Physical Archiving & Intake",
+    description: "Procedures for cataloging, packing, indexing, and storing hard-copy files safely in the storage facility.",
+    iconName: "Archive",
+    colorClass: "bg-amber-100 text-amber-800 border-amber-200"
+  },
+  {
+    id: "digital-ingestion",
+    name: "Digital Ingestion & OCR",
+    description: "Instructions for high-resolution document scanning, optical character recognition (OCR), metadata mapping, and digital repository storage.",
+    iconName: "FileDigit",
+    colorClass: "bg-blue-100 text-blue-800 border-blue-200"
+  },
+  {
+    id: "compliance-retention",
+    name: "Compliance & FOI Requests",
+    description: "Rules for legal retention calendars, personal data (PII) redaction, and Freedom of Information disclosure protocols.",
+    iconName: "ShieldAlert",
+    colorClass: "bg-violet-100 text-violet-800 border-violet-200"
+  },
+  {
+    id: "disposal-destruction",
+    name: "Secure Disposal & Shredding",
+    description: "Approved pipelines for destroying expired files safely, dual-witness sign-offs, and updating the Destruction Register.",
+    iconName: "Trash2",
+    colorClass: "bg-rose-100 text-rose-800 border-rose-200"
+  },
+  {
+    id: "vault-integrity",
+    name: "Vault Climate & Security",
+    description: "Atmospheric guidelines, humidity levels, access authorization logs, and fire prevention codes inside the core vaults.",
+    iconName: "Warehouse",
+    colorClass: "bg-emerald-100 text-emerald-800 border-emerald-200"
+  }
+];
+
+const STORE_PATH = path.join(process.cwd(), "db_shared_store.json");
+
+// Helper to load shared data
+function loadSharedStore() {
+  try {
+    if (fs.existsSync(STORE_PATH)) {
+      const data = fs.readFileSync(STORE_PATH, "utf-8");
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error("Error loading shared store, returning default templates:", error);
+  }
+  return {
+    guidelines: [],
+    categories: DEFAULT_CATEGORIES
+  };
+}
+
+// Helper to save shared data
+function saveSharedStore(data: { guidelines: any[]; categories: any[] }) {
+  try {
+    fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), "utf-8");
+    return true;
+  } catch (error) {
+    console.error("Error writing shared store to file system:", error);
+    return false;
+  }
+}
+
+// API Endpoints for Guidelines and Categories
+app.get("/api/guidelines", (req, res) => {
+  const store = loadSharedStore();
+  res.json(store.guidelines || []);
+});
+
+app.post("/api/guidelines", (req, res) => {
+  const { guidelines } = req.body;
+  if (!Array.isArray(guidelines)) {
+    res.status(400).json({ error: "guidelines must be an array" });
+    return;
+  }
+  const store = loadSharedStore();
+  store.guidelines = guidelines;
+  saveSharedStore(store);
+  res.json(store.guidelines);
+});
+
+// Sync both lists simultaneously in a single transaction if needed
+app.post("/api/sync-both", (req, res) => {
+  const { guidelines, categories } = req.body;
+  const store = loadSharedStore();
+  if (Array.isArray(guidelines)) {
+    store.guidelines = guidelines;
+  }
+  if (Array.isArray(categories)) {
+    store.categories = categories;
+  }
+  saveSharedStore(store);
+  res.json({ success: true, guidelines: store.guidelines, categories: store.categories });
+});
+
+app.get("/api/categories", (req, res) => {
+  const store = loadSharedStore();
+  res.json(store.categories || DEFAULT_CATEGORIES);
+});
+
+app.post("/api/categories", (req, res) => {
+  const { categories } = req.body;
+  if (!Array.isArray(categories)) {
+    res.status(400).json({ error: "categories must be an array" });
+    return;
+  }
+  const store = loadSharedStore();
+  store.categories = categories;
+  saveSharedStore(store);
+  res.json(store.categories);
+});
+
+app.post("/api/reset", (req, res) => {
+  const defaultStore = {
+    guidelines: [],
+    categories: DEFAULT_CATEGORIES
+  };
+  saveSharedStore(defaultStore);
+  res.json({ success: true, ...defaultStore });
+});
 
 // Lazy-initialize Gemini SDK to prevent server crash if key is missing
 let aiClient: GoogleGenAI | null = null;
