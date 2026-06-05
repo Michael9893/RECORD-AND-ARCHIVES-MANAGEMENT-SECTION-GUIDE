@@ -67,78 +67,87 @@ export default function App() {
   // Dynamic division load rate (each added guideline contributes 1% up to 100%, starting from 0%)
   const divisionLoad = Math.min(100, guidelines.length * 1);
 
-  // 1. Fetch initial data from server on component mount
+  // 1. Fetch initial and ongoing data from server to keep database in perfect sync across multiple tabs/accounts
+  const syncWithServer = async (silent = false) => {
+    try {
+      if (!silent) setIsSyncing(true);
+      const [resGuidelines, resCategories] = await Promise.all([
+        fetch("/api/guidelines").then(r => r.json()),
+        fetch("/api/categories").then(r => r.json())
+      ]);
+
+      // Clean any standard legacy guidelines immediately
+      const serverFiltered = Array.isArray(resGuidelines)
+        ? resGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
+        : [];
+
+      const hadLegacyOnServer = Array.isArray(resGuidelines) && resGuidelines.length !== serverFiltered.length;
+      const hasGuidelinesOnServer = serverFiltered.length > 0;
+
+      let finalGuidelines = serverFiltered;
+      let finalCategories = resCategories;
+
+      // Migrate local guidelines and categories to server if server is empty
+      const localGStr = localStorage.getItem("rams_guidelines");
+      let localGuidelines = localGStr ? JSON.parse(localGStr) : [];
+      localGuidelines = Array.isArray(localGuidelines)
+        ? localGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
+        : [];
+
+      if (!hasGuidelinesOnServer && localGuidelines.length > 0) {
+        await fetch("/api/guidelines", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ guidelines: localGuidelines })
+        });
+        finalGuidelines = localGuidelines;
+      } else if (hadLegacyOnServer || (Array.isArray(resGuidelines) && resGuidelines.length !== serverFiltered.length)) {
+        // If the server had legacy guidelines, sync back the clean state so they are retired from the backend store
+        await fetch("/api/guidelines", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ guidelines: serverFiltered })
+        });
+      }
+
+      if (Array.isArray(finalGuidelines)) {
+        setGuidelines(finalGuidelines);
+        localStorage.setItem("rams_guidelines", JSON.stringify(finalGuidelines));
+      }
+      if (Array.isArray(finalCategories)) {
+        setCategories(finalCategories);
+      }
+
+      setIsLoadedFromServer(true);
+    } catch (err) {
+      console.error("Unable to load shared store data:", err);
+    } finally {
+      if (!silent) {
+        setIsSyncing(false);
+      }
+    }
+  };
+
+  // Sync on component mount
   useEffect(() => {
-    let active = true;
-    const loadFromServerSharedStore = async () => {
-      try {
-        setIsSyncing(true);
-        const [resGuidelines, resCategories] = await Promise.all([
-          fetch("/api/guidelines").then(r => r.json()),
-          fetch("/api/categories").then(r => r.json())
-        ]);
+    syncWithServer(false);
+  }, []);
 
-        if (!active) return;
-
-        // Clean any standard legacy guidelines immediately
-        const serverFiltered = Array.isArray(resGuidelines)
-          ? resGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
-          : [];
-
-        const hadLegacyOnServer = Array.isArray(resGuidelines) && resGuidelines.length !== serverFiltered.length;
-
-        const hasGuidelinesOnServer = serverFiltered.length > 0;
-        const hasCategoriesOnServer = Array.isArray(resCategories) && resCategories.length > 0;
-
-        let finalGuidelines = serverFiltered;
-        let finalCategories = resCategories;
-
-        // Migrate local guidelines and categories to server if server is empty
-        const localGStr = localStorage.getItem("rams_guidelines");
-        let localGuidelines = localGStr ? JSON.parse(localGStr) : [];
-        localGuidelines = Array.isArray(localGuidelines)
-          ? localGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
-          : [];
-
-        if (!hasGuidelinesOnServer && localGuidelines.length > 0) {
-          await fetch("/api/guidelines", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ guidelines: localGuidelines })
-          });
-          finalGuidelines = localGuidelines;
-        } else if (hadLegacyOnServer || (Array.isArray(resGuidelines) && resGuidelines.length !== serverFiltered.length)) {
-          // If the server had legacy guidelines, sync back the clean state so they are retired from the backend store
-          await fetch("/api/guidelines", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ guidelines: serverFiltered })
-          });
-        }
-
-        if (Array.isArray(finalGuidelines)) {
-          setGuidelines(finalGuidelines);
-          localStorage.setItem("rams_guidelines", JSON.stringify(finalGuidelines));
-        }
-        if (Array.isArray(finalCategories)) {
-          setCategories(finalCategories);
-        }
-
-        setIsLoadedFromServer(true);
-      } catch (err) {
-        console.error("Unable to load initial shared store data:", err);
-      } finally {
-        if (active) {
-          setIsSyncing(false);
-        }
+  // Sync immediately when tab gains focus or user returns to the catalog
+  useEffect(() => {
+    const handleSyncOnFocus = () => {
+      if (document.visibilityState === "visible") {
+        syncWithServer(true); // silent background sync
       }
     };
 
-    loadFromServerSharedStore();
+    window.addEventListener("focus", handleSyncOnFocus);
+    document.addEventListener("visibilitychange", handleSyncOnFocus);
     return () => {
-      active = false;
+      window.removeEventListener("focus", handleSyncOnFocus);
+      document.removeEventListener("visibilitychange", handleSyncOnFocus);
     };
-  }, []);
+  }, [isEditingGuideline, isCreatingGuideline]);
 
   // 2. Clear state-listening useEffects that were triggering race-condition overwrites.
   // Instead, save to local backup backup as an immediate secondary layer.
@@ -171,55 +180,25 @@ export default function App() {
     }
   };
 
-  // Gentle background auto-polling to keep other accounts/tabs perfectly in sync without manual refresh
+  // Rapid background auto-polling (every 2.5 seconds) to keep accounts and viewers fully synchronous in real-time
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
         // Only run background sync if the user is not actively editing or creating to prevent form disruption
         if (isEditingGuideline || isCreatingGuideline) return;
         
-        const [resGuidelines, resCategories] = await Promise.all([
-          fetch("/api/guidelines").then(r => r.json()),
-          fetch("/api/categories").then(r => r.json())
-        ]);
-        
-        if (Array.isArray(resGuidelines)) {
-          setGuidelines(resGuidelines);
-          localStorage.setItem("rams_guidelines", JSON.stringify(resGuidelines));
-        }
-        if (Array.isArray(resCategories)) {
-          setCategories(resCategories);
-          localStorage.setItem("rams_categories", JSON.stringify(resCategories));
-        }
+        await syncWithServer(true); // Silent background refresh
       } catch (err) {
         console.error("Background auto-sync failed:", err);
       }
-    }, 15000); // Poll every 15 seconds
+    }, 2500); // 2.5 seconds sync speed
 
     return () => clearInterval(interval);
   }, [isEditingGuideline, isCreatingGuideline]);
 
   // General direct fetch trigger for manual Sync Now triggers
   const handleForceSyncWithServer = async () => {
-    try {
-      setIsSyncing(true);
-      const [resGuidelines, resCategories] = await Promise.all([
-        fetch("/api/guidelines").then(r => r.json()),
-        fetch("/api/categories").then(r => r.json())
-      ]);
-      if (Array.isArray(resGuidelines)) {
-        setGuidelines(resGuidelines);
-        localStorage.setItem("rams_guidelines", JSON.stringify(resGuidelines));
-      }
-      if (Array.isArray(resCategories)) {
-        setCategories(resCategories);
-        localStorage.setItem("rams_categories", JSON.stringify(resCategories));
-      }
-    } catch (err) {
-      console.error("Failed to manually sync with server database:", err);
-    } finally {
-      setIsSyncing(false);
-    }
+    await syncWithServer(false);
   };
 
   // Handle toggling of favorite states
