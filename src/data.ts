@@ -1,0 +1,46 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { Category, Guideline } from "./types";
+
+export const INITIAL_CATEGORIES: Category[] = [
+  {
+    id: "physical-archiving",
+    name: "Physical Archiving & Intake",
+    description: "Procedures for cataloging, packing, indexing, and storing hard-copy files safely in the storage facility.",
+    iconName: "Archive",
+    colorClass: "bg-amber-100 text-amber-800 border-amber-200"
+  },
+  {
+    id: "digital-ingestion",
+    name: "Digital Ingestion & OCR",
+    description: "Instructions for high-resolution document scanning, optical character recognition (OCR), metadata mapping, and digital repository storage.",
+    iconName: "FileDigit",
+    colorClass: "bg-blue-100 text-blue-800 border-blue-200"
+  },
+  {
+    id: "compliance-retention",
+    name: "Compliance & FOI Requests",
+    description: "Rules for legal retention calendars, personal data (PII) redaction, and Freedom of Information disclosure protocols.",
+    iconName: "ShieldAlert",
+    colorClass: "bg-violet-100 text-violet-800 border-violet-200"
+  },
+  {
+    id: "disposal-destruction",
+    name: "Secure Disposal & Shredding",
+    description: "Approved pipelines for destroying expired files safely, dual-witness sign-offs, and updating the Destruction Register.",
+    iconName: "Trash2",
+    colorClass: "bg-rose-100 text-rose-800 border-rose-200"
+  },
+  {
+    id: "vault-integrity",
+    name: "Vault Climate & Security",
+    description: "Atmospheric guidelines, humidity levels, access authorization logs, and fire prevention codes inside the core vaults.",
+    iconName: "Warehouse",
+    colorClass: "bg-emerald-100 text-emerald-800 border-emerald-200"
+  }
+];
+
+export const INITIAL_GUIDELINES: Guideline[] = [];

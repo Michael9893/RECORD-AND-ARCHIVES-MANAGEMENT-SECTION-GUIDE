@@ -1,0 +1,6 @@
+{
+  "name": "RAMS FO1 Guidelines",
+  "description": "A professional digital guidebook for the Records and Archive Management Section, featuring procedure searches, visual flowcharts, admin management, and an AI procedures assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
