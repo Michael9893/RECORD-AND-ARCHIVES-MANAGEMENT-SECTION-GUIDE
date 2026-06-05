@@ -30,7 +30,10 @@ export default function App() {
   // Sync state stores with LocalStorage & Server
   const [guidelines, setGuidelines] = useState<Guideline[]>(() => {
     const local = localStorage.getItem("rams_guidelines");
-    return local ? JSON.parse(local) : INITIAL_GUIDELINES;
+    const parsed = local ? JSON.parse(local) : INITIAL_GUIDELINES;
+    return Array.isArray(parsed) 
+      ? parsed.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
+      : [];
   });
 
   const [categories, setCategories] = useState<Category[]>(() => {
@@ -77,17 +80,25 @@ export default function App() {
 
         if (!active) return;
 
-        const hasGuidelinesOnServer = Array.isArray(resGuidelines) && resGuidelines.length > 0;
+        // Clean any standard legacy guidelines immediately
+        const serverFiltered = Array.isArray(resGuidelines)
+          ? resGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
+          : [];
+
+        const hadLegacyOnServer = Array.isArray(resGuidelines) && resGuidelines.length !== serverFiltered.length;
+
+        const hasGuidelinesOnServer = serverFiltered.length > 0;
         const hasCategoriesOnServer = Array.isArray(resCategories) && resCategories.length > 0;
 
-        let finalGuidelines = resGuidelines;
+        let finalGuidelines = serverFiltered;
         let finalCategories = resCategories;
 
         // Migrate local guidelines and categories to server if server is empty
         const localGStr = localStorage.getItem("rams_guidelines");
-        const localGuidelines = localGStr ? JSON.parse(localGStr) : [];
-        const localCStr = localStorage.getItem("rams_categories");
-        const localCategories = localCStr ? JSON.parse(localCStr) : [];
+        let localGuidelines = localGStr ? JSON.parse(localGStr) : [];
+        localGuidelines = Array.isArray(localGuidelines)
+          ? localGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
+          : [];
 
         if (!hasGuidelinesOnServer && localGuidelines.length > 0) {
           await fetch("/api/guidelines", {
@@ -96,19 +107,18 @@ export default function App() {
             body: JSON.stringify({ guidelines: localGuidelines })
           });
           finalGuidelines = localGuidelines;
-        }
-
-        if (!hasCategoriesOnServer && localCategories.length > 0) {
-          await fetch("/api/categories", {
+        } else if (hadLegacyOnServer || (Array.isArray(resGuidelines) && resGuidelines.length !== serverFiltered.length)) {
+          // If the server had legacy guidelines, sync back the clean state so they are retired from the backend store
+          await fetch("/api/guidelines", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ categories: localCategories })
+            body: JSON.stringify({ guidelines: serverFiltered })
           });
-          finalCategories = localCategories;
         }
 
         if (Array.isArray(finalGuidelines)) {
           setGuidelines(finalGuidelines);
+          localStorage.setItem("rams_guidelines", JSON.stringify(finalGuidelines));
         }
         if (Array.isArray(finalCategories)) {
           setCategories(finalCategories);

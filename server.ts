@@ -59,6 +59,8 @@ const DEFAULT_CATEGORIES = [
   }
 ];
 
+const DEFAULT_GUIDELINES: any[] = [];
+
 const STORE_PATH = path.join(process.cwd(), "db_shared_store.json");
 
 // Helper to load shared data
@@ -66,15 +68,22 @@ function loadSharedStore() {
   try {
     if (fs.existsSync(STORE_PATH)) {
       const data = fs.readFileSync(STORE_PATH, "utf-8");
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      if (!parsed.guidelines || parsed.guidelines.length === 0) {
+        parsed.guidelines = DEFAULT_GUIDELINES;
+        saveSharedStore(parsed);
+      }
+      return parsed;
     }
   } catch (error) {
     console.error("Error loading shared store, returning default templates:", error);
   }
-  return {
-    guidelines: [],
+  const seed = {
+    guidelines: DEFAULT_GUIDELINES,
     categories: DEFAULT_CATEGORIES
   };
+  saveSharedStore(seed);
+  return seed;
 }
 
 // Helper to save shared data
@@ -139,7 +148,7 @@ app.post("/api/categories", (req, res) => {
 
 app.post("/api/reset", (req, res) => {
   const defaultStore = {
-    guidelines: [],
+    guidelines: DEFAULT_GUIDELINES,
     categories: DEFAULT_CATEGORIES
   };
   saveSharedStore(defaultStore);
