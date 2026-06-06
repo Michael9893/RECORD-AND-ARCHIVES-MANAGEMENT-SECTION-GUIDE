@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "guideline": {
+      "title": "Guideline",
+      "description": "Division procedural guidelines",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "steps": { "type": "array" },
+        "imageUrls": { "type": "array" },
+        "videoUrls": { "type": "array" },
+        "attachments": { "type": "array" },
+        "flowchart": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "title", "description", "category", "steps"]
+    },
+    "category": {
+      "title": "Category",
+      "description": "Division categories for grouping guidelines",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "iconName": { "type": "string" },
+        "colorClass": { "type": "string" }
+      },
+      "required": ["id", "name", "description"]
+    }
+  },
+  "firestore": {
+    "guidelines/{guidelineId}": {
+      "schema": "guideline",
+      "description": "Collection where guidelines are stored"
+    },
+    "categories/{categoryId}": {
+      "schema": "category",
+      "description": "Collection where categories are stored"
+    }
+  }
+}

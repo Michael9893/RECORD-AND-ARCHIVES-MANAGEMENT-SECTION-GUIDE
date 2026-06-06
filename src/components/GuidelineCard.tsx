@@ -11,9 +11,11 @@ import {
   Flame, 
   Video, 
   ArrowRight,
-  Eye
+  Eye,
+  ChevronUp,
+  ChevronDown
 } from "lucide-react";
-import { Category, Guideline } from "../types";
+import { Category, Guideline, UserRole } from "../types";
 
 interface GuidelineCardProps {
   key?: string | number;
@@ -22,6 +24,8 @@ interface GuidelineCardProps {
   isBookmarked: boolean;
   onToggleBookmark: (id: string, e: React.MouseEvent) => void;
   onSelect: () => void;
+  currentRole?: UserRole;
+  onMoveGuideline?: (id: string, direction: "up" | "down", e: React.MouseEvent) => void;
 }
 
 export default function GuidelineCard({
@@ -29,7 +33,9 @@ export default function GuidelineCard({
   categories,
   isBookmarked,
   onToggleBookmark,
-  onSelect
+  onSelect,
+  currentRole = "VIEWER",
+  onMoveGuideline
 }: GuidelineCardProps) {
   // Find category metadata
   const categoryMeta = categories.find(c => c.id === guideline.category) || {
@@ -45,7 +51,7 @@ export default function GuidelineCard({
   return (
     <article 
       id={`gd-card-${guideline.id}`}
-      className="group bg-white rounded-2xl shadow-sm hover:shadow-md border border-slate-200 hover:border-indigo-200 transition-all duration-300 flex flex-col overflow-hidden"
+      className="group bg-white rounded-2xl shadow-sm hover:shadow-md border border-slate-200 hover:border-indigo-200 transition-all duration-300 flex flex-col overflow-hidden animate-fade-in"
     >
       {/* Visual Header Image if present, else a matching colored slate background */}
       <div className="relative h-40 bg-slate-100 overflow-hidden">
@@ -88,7 +94,7 @@ export default function GuidelineCard({
       {/* Card Content Area */}
       <div className="p-5 flex-1 flex flex-col justify-between">
         <div>
-          <h3 className="font-sans font-bold text-slate-800 text-base leading-snug group-hover:text-indigo-650 transition-colors mb-2 line-clamp-2">
+          <h3 className="font-sans font-bold text-slate-800 text-base leading-snug group-hover:text-indigo-650 transition-colors mb-2 line-clamp-2 font-semibold">
             {guideline.title}
           </h3>
           <p className="text-slate-500 text-xs font-sans leading-relaxed mb-4 line-clamp-3">
@@ -125,9 +131,31 @@ export default function GuidelineCard({
 
           {/* Action Row */}
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono font-semibold text-slate-400">
-              ID: {guideline.id}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-mono font-semibold text-slate-400">
+                ID: {guideline.id}
+              </span>
+              {currentRole === "ADMIN" && onMoveGuideline && (
+                <div className="flex items-center bg-slate-150 p-0.5 rounded-lg border border-slate-200 ml-1.5 shadow-2xs">
+                  <button
+                    onClick={(e) => onMoveGuideline(guideline.id, "up", e)}
+                    className="p-0.5 hover:bg-white text-slate-500 hover:text-slate-900 rounded transition-all cursor-pointer shadow-none"
+                    title="Move Item Up Catalog"
+                    type="button"
+                  >
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={(e) => onMoveGuideline(guideline.id, "down", e)}
+                    className="p-0.5 hover:bg-white text-slate-500 hover:text-slate-900 rounded transition-all cursor-pointer shadow-none"
+                    title="Move Item Down Catalog"
+                    type="button"
+                  >
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               id={`btn-open-card-guideline-id-${guideline.id}`}
               onClick={onSelect}

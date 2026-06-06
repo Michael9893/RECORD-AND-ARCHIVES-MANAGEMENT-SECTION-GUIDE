@@ -26,47 +26,20 @@ import AiAssistant from "./components/AiAssistant";
 import CategoryManager from "./components/CategoryManager";
 import BrandLogo from "./components/BrandLogo";
 
-// Safe LocalStorage helpers to prevent DOMExceptions in strict Incognito or Sandbox environments
-const safeGetItem = (key: string): string | null => {
-  try {
-    return localStorage.getItem(key);
-  } catch (e) {
-    console.warn(`localStorage.getItem failed for key "${key}":`, e);
-    return null;
-  }
-};
-
-const safeSetItem = (key: string, value: string): void => {
-  try {
-    localStorage.setItem(key, value);
-  } catch (e) {
-    console.warn(`localStorage.setItem failed for key "${key}":`, e);
-  }
-};
-
-const safeParseJSON = <T,>(jsonString: string | null, fallback: T): T => {
-  if (!jsonString) return fallback;
-  try {
-    return JSON.parse(jsonString) as T;
-  } catch (e) {
-    console.warn("safeParseJSON failed for string:", jsonString, e);
-    return fallback;
-  }
-};
+// Firebase and Firestore integration
+import { collection, onSnapshot, query, orderBy, setDoc, doc, deleteDoc, getDocs } from "firebase/firestore";
+import { db } from "./firebase";
 
 export default function App() {
   // Sync state stores with LocalStorage & Server
   const [guidelines, setGuidelines] = useState<Guideline[]>(() => {
-    const local = safeGetItem("rams_guidelines");
-    const parsed = safeParseJSON<Guideline[]>(local, INITIAL_GUIDELINES);
-    return Array.isArray(parsed) 
-      ? parsed.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
-      : [];
+    const local = localStorage.getItem("rams_guidelines");
+    return local ? JSON.parse(local) : INITIAL_GUIDELINES;
   });
 
   const [categories, setCategories] = useState<Category[]>(() => {
-    const local = safeGetItem("rams_categories");
-    return safeParseJSON<Category[]>(local, INITIAL_CATEGORIES);
+    const local = localStorage.getItem("rams_categories");
+    return local ? JSON.parse(local) : INITIAL_CATEGORIES;
   });
 
   const [isLoadedFromServer, setIsLoadedFromServer] = useState(false);
@@ -77,8 +50,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   
   const [bookmarkedIds, setBookmarkedIds] = useState<string[]>(() => {
-    const local = safeGetItem("rams_bookmarks");
-    return safeParseJSON<string[]>(local, []);
+    const local = localStorage.getItem("rams_bookmarks");
+    return local ? JSON.parse(local) : [];
   });
 
   const [selectedGuidelineId, setSelectedGuidelineId] = useState<string | null>(null);
@@ -95,256 +68,213 @@ export default function App() {
   // Dynamic division load rate (each added guideline contributes 1% up to 100%, starting from 0%)
   const divisionLoad = Math.min(100, guidelines.length * 1);
 
-  // 1. Fetch initial and ongoing data from server to keep database in perfect sync across multiple tabs/accounts
-  const syncWithServer = async (silent = false) => {
+  // 1. Establish fully persistent real-time Firestore database triggers
+  useEffect(() => {
+    let unsubscribeGuidelines: () => void = () => {};
+    let unsubscribeCategories: () => void = () => {};
+
     try {
-      if (!silent) setIsSyncing(true);
-      const t = Date.now();
+      setIsSyncing(true);
 
-      // 1. Safe fetch of Guidelines
-      let resGuidelines: Guideline[] = [];
-      let fetchGuidelinesSuccess = false;
-      try {
-        const responseG = await fetch(`/api/guidelines?t=${t}`);
-        if (responseG.ok) {
-          const contentTypeG = responseG.headers.get("Content-Type") || "";
-          if (contentTypeG.includes("application/json")) {
-            resGuidelines = await responseG.json();
-            fetchGuidelinesSuccess = true;
-          }
-        }
-      } catch (err) {
-        console.warn("Failed to fetch guidelines from server:", err);
-      }
+      // Listen to guidelines ordered by 'order'
+      const qGuidelines = query(collection(db, "guidelines"), orderBy("order", "asc"));
+      unsubscribeGuidelines = onSnapshot(qGuidelines, async (snapshot) => {
+        const gList: Guideline[] = [];
+        snapshot.forEach((doc) => {
+          gList.push(doc.data() as Guideline);
+        });
 
-      // 2. Safe fetch of Categories
-      let resCategories: Category[] = [];
-      let fetchCategoriesSuccess = false;
-      try {
-        const responseC = await fetch(`/api/categories?t=${t}`);
-        if (responseC.ok) {
-          const contentTypeC = responseC.headers.get("Content-Type") || "";
-          if (contentTypeC.includes("application/json")) {
-            resCategories = await responseC.json();
-            fetchCategoriesSuccess = true;
-          }
-        }
-      } catch (err) {
-        console.warn("Failed to fetch categories from server:", err);
-      }
-
-      // 3. Safe fetch of Bookmarks
-      let resBookmarks: string[] = [];
-      let fetchBookmarksSuccess = false;
-      try {
-        const responseB = await fetch(`/api/bookmarks?t=${t}`);
-        if (responseB.ok) {
-          const contentTypeB = responseB.headers.get("Content-Type") || "";
-          if (contentTypeB.includes("application/json")) {
-            resBookmarks = await responseB.json();
-            fetchBookmarksSuccess = true;
-          }
-        }
-      } catch (err) {
-        console.warn("Failed to fetch bookmarks from server:", err);
-      }
-
-      // Handle guidelines merge & migration
-      if (fetchGuidelinesSuccess) {
-        const serverFiltered = Array.isArray(resGuidelines)
-          ? resGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
-          : [];
-
-        const hadLegacyOnServer = Array.isArray(resGuidelines) && resGuidelines.length !== serverFiltered.length;
-        const hasGuidelinesOnServer = serverFiltered.length > 0;
-
-        let finalGuidelines = serverFiltered;
-
-        // Migrate local guidelines and categories to server if server is empty
-        const localGStr = safeGetItem("rams_guidelines");
-        let localGuidelines = safeParseJSON<Guideline[]>(localGStr, []);
-        localGuidelines = Array.isArray(localGuidelines)
-          ? localGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
-          : [];
-
-        if (!hasGuidelinesOnServer && localGuidelines.length > 0) {
+        if (gList.length === 0) {
+          console.log("Firestore empty. Seeding guidelines to Cloud...");
           try {
-            await fetch("/api/guidelines", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ guidelines: localGuidelines })
-            });
-            finalGuidelines = localGuidelines;
-          } catch (err) {
-            console.warn("Failed to migrate guidelines to empty server:", err);
+            for (let i = 0; i < INITIAL_GUIDELINES.length; i++) {
+              const item = INITIAL_GUIDELINES[i];
+              await setDoc(doc(db, "guidelines", item.id), {
+                ...item,
+                order: i
+              });
+            }
+          } catch (e) {
+            console.error("Failed to seed guidelines to Firestore:", e);
           }
-        } else if (hadLegacyOnServer || (Array.isArray(resGuidelines) && resGuidelines.length !== serverFiltered.length)) {
-          try {
-            await fetch("/api/guidelines", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ guidelines: serverFiltered })
-            });
-          } catch (err) {
-            console.warn("Failed to update clean guidelines with removed legacy on server:", err);
-          }
+        } else {
+          setGuidelines(gList);
+          localStorage.setItem("rams_guidelines", JSON.stringify(gList));
+          setIsLoadedFromServer(true);
+          setIsSyncing(false);
         }
-
-        if (Array.isArray(finalGuidelines)) {
-          setGuidelines(finalGuidelines);
-          safeSetItem("rams_guidelines", JSON.stringify(finalGuidelines));
-        }
-      }
-
-      // Handle categories updates
-      if (fetchCategoriesSuccess) {
-        if (Array.isArray(resCategories)) {
-          setCategories(resCategories);
-          safeSetItem("rams_categories", JSON.stringify(resCategories));
-        }
-      }
-
-      // Handle bookmarks merge & migration
-      if (fetchBookmarksSuccess) {
-        const localBStr = safeGetItem("rams_bookmarks");
-        let localBookmarks = safeParseJSON<string[]>(localBStr, []);
-        if (!Array.isArray(localBookmarks)) {
-          localBookmarks = [];
-        }
-
-        const hasBookmarksOnServer = Array.isArray(resBookmarks) && resBookmarks.length > 0;
-        let finalBookmarks = resBookmarks;
-
-        if (!hasBookmarksOnServer && localBookmarks.length > 0) {
-          try {
-            await fetch("/api/bookmarks", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ bookmarkedIds: localBookmarks })
-            });
-            finalBookmarks = localBookmarks;
-          } catch (err) {
-            console.warn("Failed to migrate bookmarks to server:", err);
-          }
-        }
-
-        if (Array.isArray(finalBookmarks)) {
-          setBookmarkedIds(finalBookmarks);
-          safeSetItem("rams_bookmarks", JSON.stringify(finalBookmarks));
-        }
-      }
-
-      setIsLoadedFromServer(true);
-    } catch (err: any) {
-      console.warn("Unable to load shared store data (this is normal during startup):", err.message || err);
-      // Ensure we still mark loaded as true so fallback state renders if server is down or during temporary restart
-      setIsLoadedFromServer(true);
-    } finally {
-      if (!silent) {
+      }, (error) => {
+        console.error("Firestore guidelines sync subscription error:", error);
         setIsSyncing(false);
-      }
+      });
+
+      // Listen to categories
+      unsubscribeCategories = onSnapshot(collection(db, "categories"), async (snapshot) => {
+        const cList: Category[] = [];
+        snapshot.forEach((doc) => {
+          cList.push(doc.data() as Category);
+        });
+
+        if (cList.length === 0) {
+          console.log("Firestore empty. Seeding categories to Cloud...");
+          try {
+            for (const item of INITIAL_CATEGORIES) {
+              await setDoc(doc(db, "categories", item.id), item);
+            }
+          } catch (e) {
+            console.error("Failed to seed categories to Firestore:", e);
+          }
+        } else {
+          setCategories(cList);
+          localStorage.setItem("rams_categories", JSON.stringify(cList));
+        }
+      }, (error) => {
+        console.error("Firestore categories sync subscription error:", error);
+      });
+
+    } catch (err) {
+      console.error("Failed to compile cloud firestore database onSnapshot handlers:", err);
+      setIsSyncing(false);
     }
-  };
 
-  // Sync on component mount
-  useEffect(() => {
-    syncWithServer(false);
-  }, []);
-
-  // Sync immediately when tab gains focus or user returns to the catalog
-  useEffect(() => {
-    const handleSyncOnFocus = () => {
-      if (document.visibilityState === "visible") {
-        syncWithServer(true); // silent background sync
-      }
-    };
-
-    window.addEventListener("focus", handleSyncOnFocus);
-    document.addEventListener("visibilitychange", handleSyncOnFocus);
     return () => {
-      window.removeEventListener("focus", handleSyncOnFocus);
-      document.removeEventListener("visibilitychange", handleSyncOnFocus);
+      unsubscribeGuidelines();
+      unsubscribeCategories();
     };
-  }, [isEditingGuideline, isCreatingGuideline]);
+  }, []);
 
   // 2. Clear state-listening useEffects that were triggering race-condition overwrites.
   // Instead, save to local backup backup as an immediate secondary layer.
   useEffect(() => {
-    safeSetItem("rams_bookmarks", JSON.stringify(bookmarkedIds));
+    localStorage.setItem("rams_bookmarks", JSON.stringify(bookmarkedIds));
   }, [bookmarkedIds]);
 
-  // Dynamic persistence helpers
+  // Dynamic persistence helpers targeting both Express server store & Firestore database
   const persistGuidelines = async (updatedGuidelines: Guideline[]) => {
     try {
+      // 1. Sync with standard Express API (keeps local file backup safe!)
       await fetch("/api/guidelines", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ guidelines: updatedGuidelines })
       });
+
+      // 2. Query and delete orphans from cloud collection
+      const snapshot = await getDocs(collection(db, "guidelines"));
+      const currentCloudIds = snapshot.docs.map(doc => doc.id);
+      const keepIds = new Set(updatedGuidelines.map(g => g.id));
+
+      for (const cloudId of currentCloudIds) {
+        if (!keepIds.has(cloudId)) {
+          await deleteDoc(doc(db, "guidelines", cloudId));
+        }
+      }
+
+      // 3. Write/update active items
+      for (let i = 0; i < updatedGuidelines.length; i++) {
+        const item = updatedGuidelines[i];
+        await setDoc(doc(db, "guidelines", item.id), {
+          ...item,
+          order: i
+        });
+      }
     } catch (err) {
-      console.error("Failed to sync guidelines with shared database:", err);
+      console.error("Failed to sync guidelines with Firestore cloud database:", err);
     }
   };
 
   const persistCategories = async (updatedCategories: Category[]) => {
     try {
+      // 1. Sync with standard Express API
       await fetch("/api/categories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ categories: updatedCategories })
       });
+
+      // 2. Query and delete orphans
+      const snapshot = await getDocs(collection(db, "categories"));
+      const currentCloudIds = snapshot.docs.map(doc => doc.id);
+      const keepIds = new Set(updatedCategories.map(c => c.id));
+
+      for (const cloudId of currentCloudIds) {
+        if (!keepIds.has(cloudId)) {
+          await deleteDoc(doc(db, "categories", cloudId));
+        }
+      }
+
+      // 3. Write/update items
+      for (const cat of updatedCategories) {
+        await setDoc(doc(db, "categories", cat.id), cat);
+      }
     } catch (err) {
-      console.error("Failed to sync categories with shared database:", err);
+      console.error("Failed to sync categories with Firestore cloud database:", err);
     }
   };
 
-  // Rapid background auto-polling (every 2.5 seconds) to keep accounts and viewers fully synchronous in real-time
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        // Only run background sync if the user is not actively editing or creating to prevent form disruption
-        if (isEditingGuideline || isCreatingGuideline) return;
-        
-        await syncWithServer(true); // Silent background refresh
-      } catch (err) {
-        console.error("Background auto-sync failed:", err);
-      }
-    }, 2500); // 2.5 seconds sync speed
+  // Swapping guidelines around (ADMIN only reorders elements across global screens)
+  const handleMoveGuideline = async (id: string, direction: "up" | "down", e: React.MouseEvent) => {
+    e.stopPropagation();
+    const index = guidelines.findIndex(g => g.id === id);
+    if (index === -1) return;
 
-    return () => clearInterval(interval);
-  }, [isEditingGuideline, isCreatingGuideline]);
+    const newGuidelines = [...guidelines];
+    if (direction === "up" && index > 0) {
+      const temp = newGuidelines[index];
+      newGuidelines[index] = newGuidelines[index - 1];
+      newGuidelines[index - 1] = temp;
+    } else if (direction === "down" && index < guidelines.length - 1) {
+      const temp = newGuidelines[index];
+      newGuidelines[index] = newGuidelines[index + 1];
+      newGuidelines[index + 1] = temp;
+    } else {
+      return; // Cannot move further out of bounds
+    }
+
+    // Optimistically apply locally
+    setGuidelines(newGuidelines);
+    localStorage.setItem("rams_guidelines", JSON.stringify(newGuidelines));
+    
+    // Write permanently on server-side filesystem (which then broadcasts to all visitors instantly!)
+    await persistGuidelines(newGuidelines);
+  };
 
   // General direct fetch trigger for manual Sync Now triggers
   const handleForceSyncWithServer = async () => {
-    await syncWithServer(false);
+    try {
+      setIsSyncing(true);
+      const [resGuidelines, resCategories] = await Promise.all([
+        fetch("/api/guidelines").then(r => r.json()),
+        fetch("/api/categories").then(r => r.json())
+      ]);
+      if (Array.isArray(resGuidelines)) {
+        setGuidelines(resGuidelines);
+        localStorage.setItem("rams_guidelines", JSON.stringify(resGuidelines));
+      }
+      if (Array.isArray(resCategories)) {
+        setCategories(resCategories);
+        localStorage.setItem("rams_categories", JSON.stringify(resCategories));
+      }
+    } catch (err) {
+      console.error("Failed to manually sync with server database:", err);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   // Handle toggling of favorite states
-  const handleToggleBookmark = async (id: string, e: React.MouseEvent) => {
+  const handleToggleBookmark = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const updated = bookmarkedIds.includes(id) 
-      ? bookmarkedIds.filter(bId => bId !== id) 
-      : [...bookmarkedIds, id];
-    
-    setBookmarkedIds(updated);
-    safeSetItem("rams_bookmarks", JSON.stringify(updated));
-    
-    try {
-      await fetch("/api/bookmarks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bookmarkedIds: updated })
-      });
-    } catch (err) {
-      console.error("Failed to persist bookmark to shared database:", err);
-    }
+    setBookmarkedIds(prev => 
+      prev.includes(id) ? prev.filter(bId => bId !== id) : [...prev, id]
+    );
   };
 
   // Create new procedure card - write-through directly to server
   const handleCreateGuideline = (newGuideline: Guideline) => {
     const updated = [newGuideline, ...guidelines];
     setGuidelines(updated);
-    safeSetItem("rams_guidelines", JSON.stringify(updated));
+    localStorage.setItem("rams_guidelines", JSON.stringify(updated));
     persistGuidelines(updated);
 
     setIsCreatingGuideline(false);
@@ -355,7 +285,7 @@ export default function App() {
   const handleEditGuideline = (updatedGuideline: Guideline) => {
     const updated = guidelines.map(g => g.id === updatedGuideline.id ? updatedGuideline : g);
     setGuidelines(updated);
-    safeSetItem("rams_guidelines", JSON.stringify(updated));
+    localStorage.setItem("rams_guidelines", JSON.stringify(updated));
     persistGuidelines(updated);
 
     setIsEditingGuideline(false);
@@ -366,7 +296,7 @@ export default function App() {
     if (confirm("Are you sure you want to permanently delete this guidelines procedural card from the catalog? This is irreversible.")) {
       const updated = guidelines.filter(g => g.id !== id);
       setGuidelines(updated);
-      safeSetItem("rams_guidelines", JSON.stringify(updated));
+      localStorage.setItem("rams_guidelines", JSON.stringify(updated));
       persistGuidelines(updated);
 
       setSelectedGuidelineId(null);
@@ -378,18 +308,20 @@ export default function App() {
     if (confirm("Reset current procedures catalog and custom categories back to master template seeds? This deletes custom items.")) {
       try {
         setIsSyncing(true);
+        // Clear Express backend
         const res = await fetch("/api/reset", { method: "POST" }).then(r => r.json());
-        if (res.success) {
-          setGuidelines(res.guidelines || []);
-          setCategories(res.categories || INITIAL_CATEGORIES);
-          safeSetItem("rams_guidelines", JSON.stringify(res.guidelines || []));
-          safeSetItem("rams_categories", JSON.stringify(res.categories || INITIAL_CATEGORIES));
-        } else {
-          setGuidelines(INITIAL_GUIDELINES);
-          setCategories(INITIAL_CATEGORIES);
-          safeSetItem("rams_guidelines", JSON.stringify(INITIAL_GUIDELINES));
-          safeSetItem("rams_categories", JSON.stringify(INITIAL_CATEGORIES));
+        
+        // Clear Firestore collections so the onSnapshot subscription triggers a seed write on the leader/re-seeds
+        const guidelinesSnapshot = await getDocs(collection(db, "guidelines"));
+        for (const rDoc of guidelinesSnapshot.docs) {
+          await deleteDoc(doc(db, "guidelines", rDoc.id));
         }
+
+        const categoriesSnapshot = await getDocs(collection(db, "categories"));
+        for (const catDoc of categoriesSnapshot.docs) {
+          await deleteDoc(doc(db, "categories", catDoc.id));
+        }
+
         setSelectedCategory(null);
         setSearchQuery("");
         setBookmarkedIds([]);
@@ -401,8 +333,8 @@ export default function App() {
         // Fallback
         setGuidelines(INITIAL_GUIDELINES);
         setCategories(INITIAL_CATEGORIES);
-        safeSetItem("rams_guidelines", JSON.stringify(INITIAL_GUIDELINES));
-        safeSetItem("rams_categories", JSON.stringify(INITIAL_CATEGORIES));
+        localStorage.setItem("rams_guidelines", JSON.stringify(INITIAL_GUIDELINES));
+        localStorage.setItem("rams_categories", JSON.stringify(INITIAL_CATEGORIES));
       } finally {
         setIsSyncing(false);
       }
@@ -412,14 +344,14 @@ export default function App() {
   const handleCreateCategory = (newCat: Category) => {
     const updated = [...categories, newCat];
     setCategories(updated);
-    safeSetItem("rams_categories", JSON.stringify(updated));
+    localStorage.setItem("rams_categories", JSON.stringify(updated));
     persistCategories(updated);
   };
 
   const handleDeleteCategory = (catId: string) => {
     const updated = categories.filter(c => c.id !== catId);
     setCategories(updated);
-    safeSetItem("rams_categories", JSON.stringify(updated));
+    localStorage.setItem("rams_categories", JSON.stringify(updated));
     persistCategories(updated);
 
     if (selectedCategory === catId) {
@@ -550,7 +482,6 @@ export default function App() {
               categories={categories}
               onSave={handleCreateGuideline}
               onCancel={() => setIsCreatingGuideline(false)}
-              defaultCategory={selectedCategory}
             />
           ) : isEditingGuideline && selectedGuideline ? (
             <GuidelineForm
@@ -575,96 +506,6 @@ export default function App() {
             // Default Dashboard View Layout
             <div id="dashboard-viewport" className="p-4 lg:p-6 space-y-6 max-w-7xl mx-auto w-full flex-1">
               
-              {/* 👥 REAL-TIME MULTI-USER WORKFLOW WALKTHROUGH */}
-              <div id="scenario-walkthrough-panel" className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl border border-indigo-100 p-5 shadow-sm space-y-4">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-indigo-100/60 pb-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-indigo-600 border border-indigo-500 text-white flex items-center justify-center font-bold text-sm shadow-sm">
-                      👥
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-bold text-indigo-900 uppercase tracking-wider font-mono">
-                        Multi-User Real-Time Simulator Walkthrough
-                      </h3>
-                      <p className="text-[11px] text-indigo-700 mt-0.5">
-                        Follow these simple steps side-by-side to verify immediate, persistent synchronization between ACCOUNT A and ACCOUNT B.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="relative flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                    </span>
-                    <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded font-bold uppercase tracking-wide">
-                      Live Server Connection Active
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-sans">
-                  {/* Account A Column */}
-                  <div className="bg-white p-4 rounded-xl border border-indigo-100 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-mono font-bold text-red-600 bg-red-50 border border-red-100 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                        💻 Tab 1: ACCOUNT A (Admin)
-                      </span>
-                      {currentRole !== "ADMIN" ? (
-                        <button
-                          id="btn-quick-admin-switch"
-                          onClick={() => setCurrentRole("ADMIN")}
-                          className="text-[10px] text-red-600 hover:bg-red-50 bg-white border border-red-200 rounded px-2 py-0.5 font-bold cursor-pointer transition-all hover:scale-105"
-                          type="button"
-                        >
-                          Switch to Admin
-                        </button>
-                      ) : (
-                        <span className="text-[10px] text-red-500 font-semibold font-mono">
-                          ★ Currently Active
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-slate-650 text-[11px] leading-relaxed">
-                      This represents files or policies added by division executives:
-                    </p>
-                    <ol className="list-decimal list-inside space-y-1 text-slate-500 text-[11px] pl-1">
-                      <li>Ensure active role in the sidebar says <strong className="text-slate-700">ADMIN</strong>.</li>
-                      <li>Click the black <strong className="text-indigo-600 font-semibold">+ Add Guideline</strong> button on this dashboard.</li>
-                      <li>Submit key steps & criteria for a procedural card (e.g. <em className="text-slate-800">"Office Climate Audit"</em>).</li>
-                    </ol>
-                  </div>
-
-                  {/* Account B Column */}
-                  <div className="bg-white p-4 rounded-xl border border-indigo-100 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                        🕶️ Tab 2: ACCOUNT B (Incognito Viewer)
-                      </span>
-                      <button
-                        id="btn-quick-copy-url"
-                        onClick={() => {
-                          const appUrl = window.location.href;
-                          navigator.clipboard.writeText(appUrl);
-                          alert("App URL copied to clipboard! Open a brand new Incognito Browser window, paste the URL, and watch guidelines fetch live and update in real-time.");
-                        }}
-                        className="text-[10px] text-indigo-600 hover:bg-indigo-50 bg-white border border-indigo-200 rounded px-2 py-0.5 font-semibold cursor-pointer transition-all flex items-center gap-1 hover:scale-105"
-                        type="button"
-                      >
-                        Copy App URL
-                      </button>
-                    </div>
-                    <p className="text-slate-650 text-[11px] leading-relaxed">
-                      Representing standard division visitors accessing the platform:
-                    </p>
-                    <ul className="list-decimal list-inside space-y-1 text-slate-500 text-[11px] pl-1">
-                      <li>Open a new <strong className="text-indigo-600">Incognito / Private</strong> window.</li>
-                      <li>Paste the App's URL. It defaults securely to <strong className="text-slate-700">VIEWER</strong> mode.</li>
-                      <li>Watch the guideline card you created on ACCOUNT A appear instantly (<strong className="text-emerald-600">no reload required!</strong>) and stay persisted!</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-
               {/* Bento Grid Layout Section */}
               <section id="bento-dashboard-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 
@@ -930,22 +771,7 @@ export default function App() {
               </section>
 
               {/* Grid Catalog Display */}
-              {!isLoadedFromServer ? (
-                <div id="loading-deck-skeleton" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                  {[1, 2, 3].map((n) => (
-                    <div key={n} id={`skeleton-card-${n}`} className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 animate-pulse">
-                      <div className="h-40 bg-slate-100 rounded-xl w-full"></div>
-                      <div className="h-4 bg-slate-200 rounded-md w-2/3"></div>
-                      <div className="h-3 bg-slate-150 rounded-md w-full"></div>
-                      <div className="h-3 bg-slate-150 rounded-md w-4/5"></div>
-                      <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
-                        <div className="h-5 bg-slate-100 rounded-md w-16"></div>
-                        <div className="h-8 bg-slate-150 rounded-lg w-24"></div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : filteredGuidelines.length === 0 ? (
+              {filteredGuidelines.length === 0 ? (
                 <div id="no-matched-results-panel" className="bg-white rounded-2xl border border-slate-200 p-12 text-center max-w-xl mx-auto space-y-4">
                   <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mx-auto">
                     <FolderOpen className="w-8 h-8" />
@@ -978,6 +804,8 @@ export default function App() {
                       isBookmarked={bookmarkedIds.includes(g.id)}
                       onToggleBookmark={handleToggleBookmark}
                       onSelect={() => setSelectedGuidelineId(g.id)}
+                      currentRole={currentRole}
+                      onMoveGuideline={handleMoveGuideline}
                     />
                   ))}
                 </div>

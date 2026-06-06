@@ -14,7 +14,9 @@ import {
   Paperclip, 
   Workflow, 
   Check, 
-  ArrowLeft
+  ArrowLeft,
+  ChevronUp,
+  ChevronDown
 } from "lucide-react";
 import { Category, Guideline, Attachment, FlowchartStep, FlowchartStepType } from "../types";
 
@@ -23,15 +25,13 @@ interface GuidelineFormProps {
   guidelineToEdit?: Guideline | null;
   onSave: (guideline: Guideline) => void;
   onCancel: () => void;
-  defaultCategory?: string | null;
 }
 
 export default function GuidelineForm({
   categories,
   guidelineToEdit,
   onSave,
-  onCancel,
-  defaultCategory
+  onCancel
 }: GuidelineFormProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -65,7 +65,7 @@ export default function GuidelineForm({
       // Setup Defaults
       setTitle("");
       setDescription("");
-      setCategory(defaultCategory || categories[0]?.id || "");
+      setCategory(categories[0]?.id || "");
       setSteps([""]);
       setImageUrls([""]);
       setVideoUrls([]);
@@ -78,7 +78,7 @@ export default function GuidelineForm({
         { id: "node-4", label: "Log completion metadata into register", type: "end" }
       ]);
     }
-  }, [guidelineToEdit, categories, defaultCategory]);
+  }, [guidelineToEdit, categories]);
 
   // Handle steps updates
   const addStepField = () => setSteps([...steps, ""]);
@@ -90,6 +90,21 @@ export default function GuidelineForm({
     const updated = [...steps];
     updated[index] = val;
     setSteps(updated);
+  };
+  const moveStepField = (index: number, direction: "up" | "down") => {
+    if (direction === "up" && index > 0) {
+      const updated = [...steps];
+      const temp = updated[index];
+      updated[index] = updated[index - 1];
+      updated[index - 1] = temp;
+      setSteps(updated);
+    } else if (direction === "down" && index < steps.length - 1) {
+      const updated = [...steps];
+      const temp = updated[index];
+      updated[index] = updated[index + 1];
+      updated[index + 1] = temp;
+      setSteps(updated);
+    }
   };
 
   // Handle image URLs updates
@@ -149,6 +164,22 @@ export default function GuidelineForm({
 
   const removeFlowNode = (nodeId: string) => {
     setFlowchart(flowchart.filter(fb => fb.id !== nodeId));
+  };
+
+  const moveFlowNode = (index: number, direction: "up" | "down") => {
+    if (direction === "up" && index > 0) {
+      const updated = [...flowchart];
+      const temp = updated[index];
+      updated[index] = updated[index - 1];
+      updated[index - 1] = temp;
+      setFlowchart(updated);
+    } else if (direction === "down" && index < flowchart.length - 1) {
+      const updated = [...flowchart];
+      const temp = updated[index];
+      updated[index] = updated[index + 1];
+      updated[index + 1] = temp;
+      setFlowchart(updated);
+    }
   };
 
   const clearForm = () => {
@@ -294,7 +325,7 @@ export default function GuidelineForm({
             <div className="space-y-2">
               {steps.map((step, idx) => (
                 <div key={idx} className="flex items-center gap-3">
-                  <span className="text-[11px] font-mono font-bold text-slate-400 w-16">
+                  <span className="text-[11px] font-mono font-bold text-slate-400 w-16 shrink-0">
                     Step {idx + 1}
                   </span>
                   <input
@@ -306,6 +337,31 @@ export default function GuidelineForm({
                     onChange={(e) => handleStepChange(idx, e.target.value)}
                     className="flex-1 text-xs p-3 border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 transition-colors"
                   />
+                  
+                  {/* Step Rearrange Controls */}
+                  <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 gap-0.5 shrink-0 shadow-3xs">
+                    <button
+                      type="button"
+                      onClick={() => moveStepField(idx, "up")}
+                      className="p-1 text-slate-500 hover:bg-white hover:text-slate-900 rounded transition-all cursor-pointer"
+                      title="Move Step Up"
+                      disabled={idx === 0}
+                      style={{ opacity: idx === 0 ? 0.3 : 1 }}
+                    >
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveStepField(idx, "down")}
+                      className="p-1 text-slate-500 hover:bg-white hover:text-slate-900 rounded transition-all cursor-pointer"
+                      title="Move Step Down"
+                      disabled={idx === steps.length - 1}
+                      style={{ opacity: idx === steps.length - 1 ? 0.3 : 1 }}
+                    >
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
                   <button
                     id={`btn-del-step-${idx}`}
                     type="button"
@@ -502,8 +558,8 @@ export default function GuidelineForm({
                 </span>
                 
                 {flowchart.map((node, index) => (
-                  <div key={node.id} className="flex items-center justify-between p-2.5 bg-slate-950 rounded-lg border border-slate-800 text-xs text-white">
-                    <div className="flex items-center gap-3 truncate">
+                  <div key={node.id} className="flex items-center justify-between p-2.5 bg-slate-950 rounded-lg border border-slate-800 text-xs text-white gap-2 animated-fade-in">
+                    <div className="flex items-center gap-3 truncate flex-1 md:min-w-0">
                       <span className="text-[10px] font-mono text-slate-500 w-8">#{index + 1}</span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
                         node.type === "start" 
@@ -516,15 +572,40 @@ export default function GuidelineForm({
                       }`}>
                         {node.type.toUpperCase()}
                       </span>
-                      <span className="truncate text-slate-200">{node.label}</span>
+                      <span className="truncate text-slate-200 font-sans">{node.label}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => removeFlowNode(node.id)}
-                      className="text-red-400 hover:text-red-300 font-semibold"
-                    >
-                      Delete
-                    </button>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {/* Flow Node Rearranging and Delete actions */}
+                      <div className="flex bg-slate-800 p-0.5 rounded-md border border-slate-700">
+                        <button
+                          type="button"
+                          onClick={() => moveFlowNode(index, "up")}
+                          className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors cursor-pointer"
+                          title="Move Node Up Diagram"
+                          disabled={index === 0}
+                          style={{ opacity: index === 0 ? 0.3 : 1 }}
+                        >
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveFlowNode(index, "down")}
+                          className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors cursor-pointer"
+                          title="Move Node Down Diagram"
+                          disabled={index === flowchart.length - 1}
+                          style={{ opacity: index === flowchart.length - 1 ? 0.3 : 1 }}
+                        >
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeFlowNode(node.id)}
+                        className="text-red-400 hover:text-red-300 font-semibold cursor-pointer text-xs"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

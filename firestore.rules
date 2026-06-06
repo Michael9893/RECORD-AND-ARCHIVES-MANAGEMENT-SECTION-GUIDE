@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 1. Global Safety Net: default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions for validating incoming data and keys
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidGuideline(data) {
+      return data.keys().hasAll(['id', 'title', 'description', 'category', 'steps', 'createdAt', 'updatedAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() <= 250
+        && data.description is string && data.description.size() <= 4000
+        && data.category is string && data.category.size() <= 128
+        && data.steps is list && data.steps.size() <= 100
+        && (data.steps.size() == 0 || data.steps[0] is string)
+        && (!('imageUrls' in data) || (data.imageUrls is list && data.imageUrls.size() <= 20))
+        && (!('videoUrls' in data) || (data.videoUrls is list && data.videoUrls.size() <= 20))
+        && (!('attachments' in data) || (data.attachments is list && data.attachments.size() <= 20))
+        && (!('flowchart' in data) || (data.flowchart is list && data.flowchart.size() <= 100))
+        && data.createdAt is string && data.createdAt.size() <= 50
+        && data.updatedAt is string && data.updatedAt.size() <= 50
+        && (!('order' in data) || data.order is int);
+    }
+
+    function isValidCategory(data) {
+      return data.keys().hasAll(['id', 'name', 'description'])
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 150
+        && data.description is string && data.description.size() <= 2000
+        && (!('iconName' in data) || (data.iconName is string && data.iconName.size() <= 100))
+        && (!('colorClass' in data) || (data.colorClass is string && data.colorClass.size() <= 100));
+    }
+
+    // Guidelines Collection Rules
+    match /guidelines/{guidelineId} {
+      allow read: if true;
+      allow create: if isValidId(guidelineId) && isValidGuideline(incoming());
+      allow update: if isValidId(guidelineId) && isValidGuideline(incoming());
+      allow delete: if isValidId(guidelineId);
+    }
+
+    // Categories Collection Rules
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow create: if isValidId(categoryId) && isValidCategory(incoming());
+      allow update: if isValidId(categoryId) && isValidCategory(incoming());
+      allow delete: if isValidId(categoryId);
+    }
+  }
+}

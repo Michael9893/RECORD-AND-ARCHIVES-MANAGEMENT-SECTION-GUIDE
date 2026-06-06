@@ -8,11 +8,35 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import fs from "fs";
 
 // Load environment variables
 dotenv.config();
 
-import fs from "fs";
+// Firebase integration on Server-Side
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, doc, setDoc, deleteDoc, getDocs, onSnapshot, query, orderBy } from "firebase/firestore";
+
+const CONFIG_PATH = path.join(process.cwd(), "firebase-applet-config.json");
+let firebaseConfig: any = null;
+if (fs.existsSync(CONFIG_PATH)) {
+  try {
+    firebaseConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+  } catch (err) {
+    console.error("Error reading firebase-applet-config.json in backend server:", err);
+  }
+}
+
+let db: any = null;
+if (firebaseConfig) {
+  try {
+    const firebaseApp = initializeApp(firebaseConfig);
+    db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+    console.log("✓ Firestore client initialized on Server-Side successfully.");
+  } catch (err) {
+    console.error("Failed to initialize Firestore on server-side:", err);
+  }
+}
 
 const app = express();
 const PORT = 3000;
@@ -59,9 +83,135 @@ const DEFAULT_CATEGORIES = [
   }
 ];
 
-const DEFAULT_GUIDELINES: any[] = [];
+const DEFAULT_GUIDELINES: any[] = [
+  {
+    id: "gd-vlt-101",
+    title: "Vault Intake & Physical Tagging Protocol",
+    description: "Standard operating procedures for registering incoming physical documents, applying unique barcode tags, and registering safe shelving vault coordinates.",
+    category: "physical-archiving",
+    steps: [
+      "Inspect the physical dossier file for paper contamination or transport damage.",
+      "Recheck dossier index keys against the sender physical manifestation sheet.",
+      "Generate and print a unique 3-of-9 symbology barcode label containing the dossier ID.",
+      "Affix the barcode label firmly onto the upper-right corner of the physical dossier cover.",
+      "Move the folder to its allotted secure shelving unit (Vault B, Bay 4, Shelf 12) and record coordinates in the ledger."
+    ],
+    imageUrls: ["https://images.unsplash.com/photo-1568667256549-094345857637?auto=format&fit=crop&q=80&w=800"],
+    videoUrls: ["https://www.w3schools.com/html/mov_bbb.mp4"],
+    attachments: [
+      { name: "Safe_Vault_Shelving_Coordinates.pdf", url: "#", size: "240 KB" },
+      { name: "Dossier_Intake_Audit_Sheet.csv", url: "#", size: "45 KB" }
+    ],
+    flowchart: [
+      { id: "v1-start", label: "Inspect Paper Delivery Integrity", type: "start" },
+      { id: "v1-manifest", label: "Verify Manifest with Delivery Ledger", type: "process" },
+      { id: "v1-decide", label: "Dossier Integrity Verified?", type: "decision" },
+      { id: "v1-quarantine", label: "Log quarantine / Send File rejection slip", type: "end" },
+      { id: "v1-db-log", label: "Affix Barcode, Shelter in Vault Shelving", type: "end" }
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: "gd-ocr-202",
+    title: "High-Resolution Scanning & OCR Transcription Pipeline",
+    description: "Official scanning pipeline for digital archival ingestion. Guides operators through scanner DPI setups, grayscale rendering, and automated OCR accuracy checks.",
+    category: "digital-ingestion",
+    steps: [
+      "Verify scanning equipment glass is clean and output profile is configured to 300 DPI, Grayscale, Double-Sided.",
+      "Feed pages progressively into the scanner tray to prevent paper jams.",
+      "Attach standard XML archival index fields to the target digital directory.",
+      "Run the automated Tesseract transcription OCR module to capture textual data.",
+      "Validate OCR text confidence levels, correcting spelling artifacts before database commit."
+    ],
+    imageUrls: ["https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=800"],
+    videoUrls: ["https://www.w3schools.com/html/movie.mp4"],
+    attachments: [
+      { name: "Scanning_Device_Calibration_Profile.xml", url: "#", size: "12 KB" },
+      { name: "OCR_Standard_Transcription_Form.docx", url: "#", size: "88 KB" }
+    ],
+    flowchart: [
+      { id: "o2-start", label: "Configure scanner to 300 DPI Grayscale", type: "start" },
+      { id: "o2-transcribe", label: "Execute Optical Character Recognition", type: "process" },
+      { id: "o2-decide", label: "OCR Accuracy text confidence > 95%?", type: "decision" },
+      { id: "o2-manual", label: "Route to manual indexing remediation", type: "process" },
+      { id: "o2-commit", label: "Commit to Cloud Archival Repository", type: "end" }
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: "gd-foi-303",
+    title: "Freedom of Information Disclosure & Redaction Audit",
+    description: "Strict audit workflow for reviewing public FOI requests. Explains the process for masking personally identifiable data (PII) before publishing digital disclosure dockets.",
+    category: "compliance-retention",
+    steps: [
+      "Review incoming FOI disclosure request docket for legal jurisdiction boundaries.",
+      "Acquire digital master copies of target documentation securely.",
+      "Scan each page for PII elements (Names, Tax identification, Medical codes, Addresses).",
+      "Apply opaque black solid block marks over target redacted lines.",
+      "Initiate Supervisor dual-auditor check and submit authorized release file."
+    ],
+    imageUrls: ["https://images.unsplash.com/photo-1450133064473-71024230f91b?auto=format&fit=crop&q=80&w=800"],
+    videoUrls: [],
+    attachments: [
+      { name: "FOI_Egress_Disclosure_Register.pdf", url: "#", size: "1.1 MB" }
+    ],
+    flowchart: [
+      { id: "f3-start", label: "Receive Public FOI Request Docket", type: "start" },
+      { id: "f3-pii", label: "Apply Black Mask Over PII Fields", type: "process" },
+      { id: "f3-decide", label: "Compliance auditor sign-off?", type: "decision" },
+      { id: "f3-review", label: "Escalate to Legal Counsel panel", type: "end" },
+      { id: "f3-egress", label: "Publish Redacted Document Copy", type: "end" }
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: "gd-shrd-404",
+    title: "Secure Physical Disposal & Audit Witness Shredding",
+    description: "Permanent destruction routine for files exceeding their legally mandated retention cycles. Requires double supervisor verification and logging.",
+    category: "disposal-destruction",
+    steps: [
+      "Access legal retention schedule and extract records matching expire date parameters.",
+      "Physically load files into containment secure security carts.",
+      "Transfer records to industrial shredding facility under active escort.",
+      "Verify double-witness present signature credentials on the Destruction Manifest.",
+      "Execute molecular cross-cut shredding process and file final certified records into database."
+    ],
+    imageUrls: ["https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=800"],
+    videoUrls: [],
+    attachments: [
+      { name: "Destruction_Manifest_Certificate.docx", url: "#", size: "110 KB" }
+    ],
+    flowchart: [
+      { id: "s4-start", label: "Extract Files Beyond Retention Dates", type: "start" },
+      { id: "s4-authorise", label: "Obtain Internal Division Clearances", type: "process" },
+      { id: "s4-decide", label: "Double-Witness Sign-Off Secured?", type: "decision" },
+      { id: "s4-halt", label: "Halt shredding order / quarantine cart", type: "end" },
+      { id: "s4-shred", label: "Cross-cut destruction & update log register", type: "end" }
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
+];
 
 const STORE_PATH = path.join(process.cwd(), "db_shared_store.json");
+
+// Maintain an active SSE client pool for real-time pushing
+let clients: express.Response[] = [];
+
+// Helper to broadcast data changes to all active listeners globally
+function broadcastUpdate(type: string, data: any) {
+  const payload = JSON.stringify({ type, data });
+  clients.forEach((client) => {
+    try {
+      client.write(`data: ${payload}\n\n`);
+    } catch (err) {
+      console.error("Failed to write to SSE client connection:", err);
+    }
+  });
+}
 
 // Helper to load shared data
 function loadSharedStore() {
@@ -80,15 +230,14 @@ function loadSharedStore() {
   }
   const seed = {
     guidelines: DEFAULT_GUIDELINES,
-    categories: DEFAULT_CATEGORIES,
-    bookmarkedIds: []
+    categories: DEFAULT_CATEGORIES
   };
   saveSharedStore(seed);
   return seed;
 }
 
 // Helper to save shared data
-function saveSharedStore(data: any) {
+function saveSharedStore(data: { guidelines: any[]; categories: any[] }) {
   try {
     fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), "utf-8");
     return true;
@@ -98,9 +247,70 @@ function saveSharedStore(data: any) {
   }
 }
 
+// Real-time synchronization from Firestore to local filesystem
+if (db) {
+  try {
+    const qGuidelines = query(collection(db, "guidelines"), orderBy("order", "asc"));
+    onSnapshot(qGuidelines, (snapshot) => {
+      const gList: any[] = [];
+      snapshot.forEach((doc) => {
+        gList.push(doc.data());
+      });
+      if (gList.length > 0) {
+        // Deep compare or simple memory check to avoid excessive writes
+        const store = loadSharedStore();
+        if (JSON.stringify(store.guidelines) !== JSON.stringify(gList)) {
+          console.log("✓ Cloud sync updated local server memory cache guidelines");
+          store.guidelines = gList;
+          saveSharedStore(store);
+          broadcastUpdate("update", store);
+        }
+      }
+    }, (error) => {
+      console.warn("Firestore onSnapshot guidelines server sync failed/quenced:", error);
+    });
+
+    onSnapshot(collection(db, "categories"), (snapshot) => {
+      const cList: any[] = [];
+      snapshot.forEach((doc) => {
+        cList.push(doc.data());
+      });
+      if (cList.length > 0) {
+        const store = loadSharedStore();
+        if (JSON.stringify(store.categories) !== JSON.stringify(cList)) {
+          console.log("✓ Cloud sync updated local server memory cache categories");
+          store.categories = cList;
+          saveSharedStore(store);
+          broadcastUpdate("update", store);
+        }
+      }
+    }, (error) => {
+      console.warn("Firestore onSnapshot categories server sync failed/quenced:", error);
+    });
+  } catch (err) {
+    console.error("Failed to setup server-side Firestore subscription:", err);
+  }
+}
+
+// SSE Push stream setup
+app.get("/api/sync/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
+  // Heartbeat message
+  res.write(`data: ${JSON.stringify({ type: "init", message: "SSE Connection established with division JSON Store" })}\n\n`);
+
+  clients.push(res);
+
+  req.on("close", () => {
+    clients = clients.filter((client) => client !== res);
+  });
+});
+
 // API Endpoints for Guidelines and Categories
 app.get("/api/guidelines", (req, res) => {
-  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
   const store = loadSharedStore();
   res.json(store.guidelines || []);
 });
@@ -114,6 +324,7 @@ app.post("/api/guidelines", (req, res) => {
   const store = loadSharedStore();
   store.guidelines = guidelines;
   saveSharedStore(store);
+  broadcastUpdate("update", store);
   res.json(store.guidelines);
 });
 
@@ -128,11 +339,11 @@ app.post("/api/sync-both", (req, res) => {
     store.categories = categories;
   }
   saveSharedStore(store);
+  broadcastUpdate("update", store);
   res.json({ success: true, guidelines: store.guidelines, categories: store.categories });
 });
 
 app.get("/api/categories", (req, res) => {
-  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
   const store = loadSharedStore();
   res.json(store.categories || DEFAULT_CATEGORIES);
 });
@@ -146,34 +357,17 @@ app.post("/api/categories", (req, res) => {
   const store = loadSharedStore();
   store.categories = categories;
   saveSharedStore(store);
+  broadcastUpdate("update", store);
   res.json(store.categories);
-});
-
-app.get("/api/bookmarks", (req, res) => {
-  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
-  const store = loadSharedStore();
-  res.json(store.bookmarkedIds || []);
-});
-
-app.post("/api/bookmarks", (req, res) => {
-  const { bookmarkedIds } = req.body;
-  if (!Array.isArray(bookmarkedIds)) {
-    res.status(400).json({ error: "bookmarkedIds must be an array" });
-    return;
-  }
-  const store = loadSharedStore();
-  store.bookmarkedIds = bookmarkedIds;
-  saveSharedStore(store);
-  res.json(store.bookmarkedIds);
 });
 
 app.post("/api/reset", (req, res) => {
   const defaultStore = {
     guidelines: DEFAULT_GUIDELINES,
-    categories: DEFAULT_CATEGORIES,
-    bookmarkedIds: []
+    categories: DEFAULT_CATEGORIES
   };
   saveSharedStore(defaultStore);
+  broadcastUpdate("update", defaultStore);
   res.json({ success: true, ...defaultStore });
 });
 
