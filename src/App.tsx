@@ -71,9 +71,10 @@ export default function App() {
   const syncWithServer = async (silent = false) => {
     try {
       if (!silent) setIsSyncing(true);
+      const t = Date.now();
       const [resGuidelines, resCategories] = await Promise.all([
-        fetch("/api/guidelines").then(r => r.json()),
-        fetch("/api/categories").then(r => r.json())
+        fetch(`/api/guidelines?t=${t}`).then(r => r.json()),
+        fetch(`/api/categories?t=${t}`).then(r => r.json())
       ]);
 
       // Clean any standard legacy guidelines immediately
@@ -419,6 +420,7 @@ export default function App() {
               categories={categories}
               onSave={handleCreateGuideline}
               onCancel={() => setIsCreatingGuideline(false)}
+              defaultCategory={selectedCategory}
             />
           ) : isEditingGuideline && selectedGuideline ? (
             <GuidelineForm

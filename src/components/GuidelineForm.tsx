@@ -23,13 +23,15 @@ interface GuidelineFormProps {
   guidelineToEdit?: Guideline | null;
   onSave: (guideline: Guideline) => void;
   onCancel: () => void;
+  defaultCategory?: string | null;
 }
 
 export default function GuidelineForm({
   categories,
   guidelineToEdit,
   onSave,
-  onCancel
+  onCancel,
+  defaultCategory
 }: GuidelineFormProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -63,7 +65,7 @@ export default function GuidelineForm({
       // Setup Defaults
       setTitle("");
       setDescription("");
-      setCategory(categories[0]?.id || "");
+      setCategory(defaultCategory || categories[0]?.id || "");
       setSteps([""]);
       setImageUrls([""]);
       setVideoUrls([]);
@@ -76,7 +78,7 @@ export default function GuidelineForm({
         { id: "node-4", label: "Log completion metadata into register", type: "end" }
       ]);
     }
-  }, [guidelineToEdit, categories]);
+  }, [guidelineToEdit, categories, defaultCategory]);
 
   // Handle steps updates
   const addStepField = () => setSteps([...steps, ""]);

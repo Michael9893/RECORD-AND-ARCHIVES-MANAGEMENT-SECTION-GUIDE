@@ -99,6 +99,7 @@ function saveSharedStore(data: { guidelines: any[]; categories: any[] }) {
 
 // API Endpoints for Guidelines and Categories
 app.get("/api/guidelines", (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
   const store = loadSharedStore();
   res.json(store.guidelines || []);
 });
@@ -130,6 +131,7 @@ app.post("/api/sync-both", (req, res) => {
 });
 
 app.get("/api/categories", (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
   const store = loadSharedStore();
   res.json(store.categories || DEFAULT_CATEGORIES);
 });
