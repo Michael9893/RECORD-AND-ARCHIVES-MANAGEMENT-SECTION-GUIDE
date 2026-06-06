@@ -26,10 +26,28 @@ import AiAssistant from "./components/AiAssistant";
 import CategoryManager from "./components/CategoryManager";
 import BrandLogo from "./components/BrandLogo";
 
+// Safe LocalStorage helpers to prevent DOMExceptions in strict Incognito or Sandbox environments
+const safeGetItem = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch (e) {
+    console.warn(`localStorage.getItem failed for key "${key}":`, e);
+    return null;
+  }
+};
+
+const safeSetItem = (key: string, value: string): void => {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    console.warn(`localStorage.setItem failed for key "${key}":`, e);
+  }
+};
+
 export default function App() {
   // Sync state stores with LocalStorage & Server
   const [guidelines, setGuidelines] = useState<Guideline[]>(() => {
-    const local = localStorage.getItem("rams_guidelines");
+    const local = safeGetItem("rams_guidelines");
     const parsed = local ? JSON.parse(local) : INITIAL_GUIDELINES;
     return Array.isArray(parsed) 
       ? parsed.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
@@ -37,7 +55,7 @@ export default function App() {
   });
 
   const [categories, setCategories] = useState<Category[]>(() => {
-    const local = localStorage.getItem("rams_categories");
+    const local = safeGetItem("rams_categories");
     return local ? JSON.parse(local) : INITIAL_CATEGORIES;
   });
 
@@ -49,7 +67,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   
   const [bookmarkedIds, setBookmarkedIds] = useState<string[]>(() => {
-    const local = localStorage.getItem("rams_bookmarks");
+    const local = safeGetItem("rams_bookmarks");
     return local ? JSON.parse(local) : [];
   });
 
@@ -106,7 +124,7 @@ export default function App() {
       let finalCategories = resCategories;
 
       // Migrate local guidelines and categories to server if server is empty
-      const localGStr = localStorage.getItem("rams_guidelines");
+      const localGStr = safeGetItem("rams_guidelines");
       let localGuidelines = localGStr ? JSON.parse(localGStr) : [];
       localGuidelines = Array.isArray(localGuidelines)
         ? localGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
@@ -130,14 +148,14 @@ export default function App() {
 
       if (Array.isArray(finalGuidelines)) {
         setGuidelines(finalGuidelines);
-        localStorage.setItem("rams_guidelines", JSON.stringify(finalGuidelines));
+        safeSetItem("rams_guidelines", JSON.stringify(finalGuidelines));
       }
       if (Array.isArray(finalCategories)) {
         setCategories(finalCategories);
       }
 
       // Migrate local bookmarks to server if server is empty
-      const localBStr = localStorage.getItem("rams_bookmarks");
+      const localBStr = safeGetItem("rams_bookmarks");
       let localBookmarks = localBStr ? JSON.parse(localBStr) : [];
       if (!Array.isArray(localBookmarks)) {
         localBookmarks = [];
@@ -157,12 +175,14 @@ export default function App() {
 
       if (Array.isArray(finalBookmarks)) {
         setBookmarkedIds(finalBookmarks);
-        localStorage.setItem("rams_bookmarks", JSON.stringify(finalBookmarks));
+        safeSetItem("rams_bookmarks", JSON.stringify(finalBookmarks));
       }
 
       setIsLoadedFromServer(true);
     } catch (err: any) {
       console.warn("Unable to load shared store data (this is normal during startup):", err.message || err);
+      // Ensure we still mark loaded as true so fallback state renders if server is down or during temporary restart
+      setIsLoadedFromServer(true);
     } finally {
       if (!silent) {
         setIsSyncing(false);
@@ -194,7 +214,7 @@ export default function App() {
   // 2. Clear state-listening useEffects that were triggering race-condition overwrites.
   // Instead, save to local backup backup as an immediate secondary layer.
   useEffect(() => {
-    localStorage.setItem("rams_bookmarks", JSON.stringify(bookmarkedIds));
+    safeSetItem("rams_bookmarks", JSON.stringify(bookmarkedIds));
   }, [bookmarkedIds]);
 
   // Dynamic persistence helpers
@@ -251,7 +271,7 @@ export default function App() {
       : [...bookmarkedIds, id];
     
     setBookmarkedIds(updated);
-    localStorage.setItem("rams_bookmarks", JSON.stringify(updated));
+    safeSetItem("rams_bookmarks", JSON.stringify(updated));
     
     try {
       await fetch("/api/bookmarks", {
@@ -268,7 +288,7 @@ export default function App() {
   const handleCreateGuideline = (newGuideline: Guideline) => {
     const updated = [newGuideline, ...guidelines];
     setGuidelines(updated);
-    localStorage.setItem("rams_guidelines", JSON.stringify(updated));
+    safeSetItem("rams_guidelines", JSON.stringify(updated));
     persistGuidelines(updated);
 
     setIsCreatingGuideline(false);
@@ -279,7 +299,7 @@ export default function App() {
   const handleEditGuideline = (updatedGuideline: Guideline) => {
     const updated = guidelines.map(g => g.id === updatedGuideline.id ? updatedGuideline : g);
     setGuidelines(updated);
-    localStorage.setItem("rams_guidelines", JSON.stringify(updated));
+    safeSetItem("rams_guidelines", JSON.stringify(updated));
     persistGuidelines(updated);
 
     setIsEditingGuideline(false);
@@ -290,7 +310,7 @@ export default function App() {
     if (confirm("Are you sure you want to permanently delete this guidelines procedural card from the catalog? This is irreversible.")) {
       const updated = guidelines.filter(g => g.id !== id);
       setGuidelines(updated);
-      localStorage.setItem("rams_guidelines", JSON.stringify(updated));
+      safeSetItem("rams_guidelines", JSON.stringify(updated));
       persistGuidelines(updated);
 
       setSelectedGuidelineId(null);
@@ -306,13 +326,13 @@ export default function App() {
         if (res.success) {
           setGuidelines(res.guidelines || []);
           setCategories(res.categories || INITIAL_CATEGORIES);
-          localStorage.setItem("rams_guidelines", JSON.stringify(res.guidelines || []));
-          localStorage.setItem("rams_categories", JSON.stringify(res.categories || INITIAL_CATEGORIES));
+          safeSetItem("rams_guidelines", JSON.stringify(res.guidelines || []));
+          safeSetItem("rams_categories", JSON.stringify(res.categories || INITIAL_CATEGORIES));
         } else {
           setGuidelines(INITIAL_GUIDELINES);
           setCategories(INITIAL_CATEGORIES);
-          localStorage.setItem("rams_guidelines", JSON.stringify(INITIAL_GUIDELINES));
-          localStorage.setItem("rams_categories", JSON.stringify(INITIAL_CATEGORIES));
+          safeSetItem("rams_guidelines", JSON.stringify(INITIAL_GUIDELINES));
+          safeSetItem("rams_categories", JSON.stringify(INITIAL_CATEGORIES));
         }
         setSelectedCategory(null);
         setSearchQuery("");
@@ -325,8 +345,8 @@ export default function App() {
         // Fallback
         setGuidelines(INITIAL_GUIDELINES);
         setCategories(INITIAL_CATEGORIES);
-        localStorage.setItem("rams_guidelines", JSON.stringify(INITIAL_GUIDELINES));
-        localStorage.setItem("rams_categories", JSON.stringify(INITIAL_CATEGORIES));
+        safeSetItem("rams_guidelines", JSON.stringify(INITIAL_GUIDELINES));
+        safeSetItem("rams_categories", JSON.stringify(INITIAL_CATEGORIES));
       } finally {
         setIsSyncing(false);
       }
@@ -336,14 +356,14 @@ export default function App() {
   const handleCreateCategory = (newCat: Category) => {
     const updated = [...categories, newCat];
     setCategories(updated);
-    localStorage.setItem("rams_categories", JSON.stringify(updated));
+    safeSetItem("rams_categories", JSON.stringify(updated));
     persistCategories(updated);
   };
 
   const handleDeleteCategory = (catId: string) => {
     const updated = categories.filter(c => c.id !== catId);
     setCategories(updated);
-    localStorage.setItem("rams_categories", JSON.stringify(updated));
+    safeSetItem("rams_categories", JSON.stringify(updated));
     persistCategories(updated);
 
     if (selectedCategory === catId) {
@@ -854,7 +874,22 @@ export default function App() {
               </section>
 
               {/* Grid Catalog Display */}
-              {filteredGuidelines.length === 0 ? (
+              {!isLoadedFromServer ? (
+                <div id="loading-deck-skeleton" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                  {[1, 2, 3].map((n) => (
+                    <div key={n} id={`skeleton-card-${n}`} className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 animate-pulse">
+                      <div className="h-40 bg-slate-100 rounded-xl w-full"></div>
+                      <div className="h-4 bg-slate-200 rounded-md w-2/3"></div>
+                      <div className="h-3 bg-slate-150 rounded-md w-full"></div>
+                      <div className="h-3 bg-slate-150 rounded-md w-4/5"></div>
+                      <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
+                        <div className="h-5 bg-slate-100 rounded-md w-16"></div>
+                        <div className="h-8 bg-slate-150 rounded-lg w-24"></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : filteredGuidelines.length === 0 ? (
                 <div id="no-matched-results-panel" className="bg-white rounded-2xl border border-slate-200 p-12 text-center max-w-xl mx-auto space-y-4">
                   <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mx-auto">
                     <FolderOpen className="w-8 h-8" />
