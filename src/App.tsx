@@ -72,10 +72,24 @@ export default function App() {
     try {
       if (!silent) setIsSyncing(true);
       const t = Date.now();
-      const [resGuidelines, resCategories] = await Promise.all([
-        fetch(`/api/guidelines?t=${t}`).then(r => r.json()),
-        fetch(`/api/categories?t=${t}`).then(r => r.json())
+      const [responseG, responseC] = await Promise.all([
+        fetch(`/api/guidelines?t=${t}`),
+        fetch(`/api/categories?t=${t}`)
       ]);
+
+      if (!responseG.ok || !responseC.ok) {
+        throw new Error(`Server returned non-ok status: ${responseG.status} or ${responseC.status}`);
+      }
+
+      const contentTypeG = responseG.headers.get("Content-Type") || "";
+      const contentTypeC = responseC.headers.get("Content-Type") || "";
+
+      if (!contentTypeG.includes("application/json") || !contentTypeC.includes("application/json")) {
+        throw new Error("API server is starting up or returned HTML instead of JSON. Will retry...");
+      }
+
+      const resGuidelines = await responseG.json();
+      const resCategories = await responseC.json();
 
       // Clean any standard legacy guidelines immediately
       const serverFiltered = Array.isArray(resGuidelines)
@@ -120,8 +134,8 @@ export default function App() {
       }
 
       setIsLoadedFromServer(true);
-    } catch (err) {
-      console.error("Unable to load shared store data:", err);
+    } catch (err: any) {
+      console.warn("Unable to load shared store data (this is normal during startup):", err.message || err);
     } finally {
       if (!silent) {
         setIsSyncing(false);
