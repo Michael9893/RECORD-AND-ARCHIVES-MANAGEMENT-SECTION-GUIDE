@@ -44,11 +44,21 @@ const safeSetItem = (key: string, value: string): void => {
   }
 };
 
+const safeParseJSON = <T,>(jsonString: string | null, fallback: T): T => {
+  if (!jsonString) return fallback;
+  try {
+    return JSON.parse(jsonString) as T;
+  } catch (e) {
+    console.warn("safeParseJSON failed for string:", jsonString, e);
+    return fallback;
+  }
+};
+
 export default function App() {
   // Sync state stores with LocalStorage & Server
   const [guidelines, setGuidelines] = useState<Guideline[]>(() => {
     const local = safeGetItem("rams_guidelines");
-    const parsed = local ? JSON.parse(local) : INITIAL_GUIDELINES;
+    const parsed = safeParseJSON<Guideline[]>(local, INITIAL_GUIDELINES);
     return Array.isArray(parsed) 
       ? parsed.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
       : [];
@@ -56,7 +66,7 @@ export default function App() {
 
   const [categories, setCategories] = useState<Category[]>(() => {
     const local = safeGetItem("rams_categories");
-    return local ? JSON.parse(local) : INITIAL_CATEGORIES;
+    return safeParseJSON<Category[]>(local, INITIAL_CATEGORIES);
   });
 
   const [isLoadedFromServer, setIsLoadedFromServer] = useState(false);
@@ -68,7 +78,7 @@ export default function App() {
   
   const [bookmarkedIds, setBookmarkedIds] = useState<string[]>(() => {
     const local = safeGetItem("rams_bookmarks");
-    return local ? JSON.parse(local) : [];
+    return safeParseJSON<string[]>(local, []);
   });
 
   const [selectedGuidelineId, setSelectedGuidelineId] = useState<string | null>(null);
@@ -90,92 +100,138 @@ export default function App() {
     try {
       if (!silent) setIsSyncing(true);
       const t = Date.now();
-      const [responseG, responseC, responseB] = await Promise.all([
-        fetch(`/api/guidelines?t=${t}`),
-        fetch(`/api/categories?t=${t}`),
-        fetch(`/api/bookmarks?t=${t}`)
-      ]);
 
-      if (!responseG.ok || !responseC.ok || !responseB.ok) {
-        throw new Error(`Server returned non-ok status: ${responseG.status}, ${responseC.status}, or ${responseB.status}`);
+      // 1. Safe fetch of Guidelines
+      let resGuidelines: Guideline[] = [];
+      let fetchGuidelinesSuccess = false;
+      try {
+        const responseG = await fetch(`/api/guidelines?t=${t}`);
+        if (responseG.ok) {
+          const contentTypeG = responseG.headers.get("Content-Type") || "";
+          if (contentTypeG.includes("application/json")) {
+            resGuidelines = await responseG.json();
+            fetchGuidelinesSuccess = true;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to fetch guidelines from server:", err);
       }
 
-      const contentTypeG = responseG.headers.get("Content-Type") || "";
-      const contentTypeC = responseC.headers.get("Content-Type") || "";
-      const contentTypeB = responseB.headers.get("Content-Type") || "";
-
-      if (!contentTypeG.includes("application/json") || !contentTypeC.includes("application/json") || !contentTypeB.includes("application/json")) {
-        throw new Error("API server is starting up or returned HTML instead of JSON. Will retry...");
+      // 2. Safe fetch of Categories
+      let resCategories: Category[] = [];
+      let fetchCategoriesSuccess = false;
+      try {
+        const responseC = await fetch(`/api/categories?t=${t}`);
+        if (responseC.ok) {
+          const contentTypeC = responseC.headers.get("Content-Type") || "";
+          if (contentTypeC.includes("application/json")) {
+            resCategories = await responseC.json();
+            fetchCategoriesSuccess = true;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to fetch categories from server:", err);
       }
 
-      const resGuidelines = await responseG.json();
-      const resCategories = await responseC.json();
-      const resBookmarks = await responseB.json();
-
-      // Clean any standard legacy guidelines immediately
-      const serverFiltered = Array.isArray(resGuidelines)
-        ? resGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
-        : [];
-
-      const hadLegacyOnServer = Array.isArray(resGuidelines) && resGuidelines.length !== serverFiltered.length;
-      const hasGuidelinesOnServer = serverFiltered.length > 0;
-
-      let finalGuidelines = serverFiltered;
-      let finalCategories = resCategories;
-
-      // Migrate local guidelines and categories to server if server is empty
-      const localGStr = safeGetItem("rams_guidelines");
-      let localGuidelines = localGStr ? JSON.parse(localGStr) : [];
-      localGuidelines = Array.isArray(localGuidelines)
-        ? localGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
-        : [];
-
-      if (!hasGuidelinesOnServer && localGuidelines.length > 0) {
-        await fetch("/api/guidelines", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ guidelines: localGuidelines })
-        });
-        finalGuidelines = localGuidelines;
-      } else if (hadLegacyOnServer || (Array.isArray(resGuidelines) && resGuidelines.length !== serverFiltered.length)) {
-        // If the server had legacy guidelines, sync back the clean state so they are retired from the backend store
-        await fetch("/api/guidelines", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ guidelines: serverFiltered })
-        });
+      // 3. Safe fetch of Bookmarks
+      let resBookmarks: string[] = [];
+      let fetchBookmarksSuccess = false;
+      try {
+        const responseB = await fetch(`/api/bookmarks?t=${t}`);
+        if (responseB.ok) {
+          const contentTypeB = responseB.headers.get("Content-Type") || "";
+          if (contentTypeB.includes("application/json")) {
+            resBookmarks = await responseB.json();
+            fetchBookmarksSuccess = true;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to fetch bookmarks from server:", err);
       }
 
-      if (Array.isArray(finalGuidelines)) {
-        setGuidelines(finalGuidelines);
-        safeSetItem("rams_guidelines", JSON.stringify(finalGuidelines));
-      }
-      if (Array.isArray(finalCategories)) {
-        setCategories(finalCategories);
+      // Handle guidelines merge & migration
+      if (fetchGuidelinesSuccess) {
+        const serverFiltered = Array.isArray(resGuidelines)
+          ? resGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
+          : [];
+
+        const hadLegacyOnServer = Array.isArray(resGuidelines) && resGuidelines.length !== serverFiltered.length;
+        const hasGuidelinesOnServer = serverFiltered.length > 0;
+
+        let finalGuidelines = serverFiltered;
+
+        // Migrate local guidelines and categories to server if server is empty
+        const localGStr = safeGetItem("rams_guidelines");
+        let localGuidelines = safeParseJSON<Guideline[]>(localGStr, []);
+        localGuidelines = Array.isArray(localGuidelines)
+          ? localGuidelines.filter((g: any) => g.id !== "gd-uid-1001" && g.id !== "gd-uid-1002" && g.id !== "gd-uid-1003")
+          : [];
+
+        if (!hasGuidelinesOnServer && localGuidelines.length > 0) {
+          try {
+            await fetch("/api/guidelines", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ guidelines: localGuidelines })
+            });
+            finalGuidelines = localGuidelines;
+          } catch (err) {
+            console.warn("Failed to migrate guidelines to empty server:", err);
+          }
+        } else if (hadLegacyOnServer || (Array.isArray(resGuidelines) && resGuidelines.length !== serverFiltered.length)) {
+          try {
+            await fetch("/api/guidelines", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ guidelines: serverFiltered })
+            });
+          } catch (err) {
+            console.warn("Failed to update clean guidelines with removed legacy on server:", err);
+          }
+        }
+
+        if (Array.isArray(finalGuidelines)) {
+          setGuidelines(finalGuidelines);
+          safeSetItem("rams_guidelines", JSON.stringify(finalGuidelines));
+        }
       }
 
-      // Migrate local bookmarks to server if server is empty
-      const localBStr = safeGetItem("rams_bookmarks");
-      let localBookmarks = localBStr ? JSON.parse(localBStr) : [];
-      if (!Array.isArray(localBookmarks)) {
-        localBookmarks = [];
+      // Handle categories updates
+      if (fetchCategoriesSuccess) {
+        if (Array.isArray(resCategories)) {
+          setCategories(resCategories);
+          safeSetItem("rams_categories", JSON.stringify(resCategories));
+        }
       }
 
-      const hasBookmarksOnServer = Array.isArray(resBookmarks) && resBookmarks.length > 0;
-      let finalBookmarks = resBookmarks;
+      // Handle bookmarks merge & migration
+      if (fetchBookmarksSuccess) {
+        const localBStr = safeGetItem("rams_bookmarks");
+        let localBookmarks = safeParseJSON<string[]>(localBStr, []);
+        if (!Array.isArray(localBookmarks)) {
+          localBookmarks = [];
+        }
 
-      if (!hasBookmarksOnServer && localBookmarks.length > 0) {
-        await fetch("/api/bookmarks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ bookmarkedIds: localBookmarks })
-        });
-        finalBookmarks = localBookmarks;
-      }
+        const hasBookmarksOnServer = Array.isArray(resBookmarks) && resBookmarks.length > 0;
+        let finalBookmarks = resBookmarks;
 
-      if (Array.isArray(finalBookmarks)) {
-        setBookmarkedIds(finalBookmarks);
-        safeSetItem("rams_bookmarks", JSON.stringify(finalBookmarks));
+        if (!hasBookmarksOnServer && localBookmarks.length > 0) {
+          try {
+            await fetch("/api/bookmarks", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ bookmarkedIds: localBookmarks })
+            });
+            finalBookmarks = localBookmarks;
+          } catch (err) {
+            console.warn("Failed to migrate bookmarks to server:", err);
+          }
+        }
+
+        if (Array.isArray(finalBookmarks)) {
+          setBookmarkedIds(finalBookmarks);
+          safeSetItem("rams_bookmarks", JSON.stringify(finalBookmarks));
+        }
       }
 
       setIsLoadedFromServer(true);
