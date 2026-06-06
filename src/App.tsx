@@ -72,24 +72,27 @@ export default function App() {
     try {
       if (!silent) setIsSyncing(true);
       const t = Date.now();
-      const [responseG, responseC] = await Promise.all([
+      const [responseG, responseC, responseB] = await Promise.all([
         fetch(`/api/guidelines?t=${t}`),
-        fetch(`/api/categories?t=${t}`)
+        fetch(`/api/categories?t=${t}`),
+        fetch(`/api/bookmarks?t=${t}`)
       ]);
 
-      if (!responseG.ok || !responseC.ok) {
-        throw new Error(`Server returned non-ok status: ${responseG.status} or ${responseC.status}`);
+      if (!responseG.ok || !responseC.ok || !responseB.ok) {
+        throw new Error(`Server returned non-ok status: ${responseG.status}, ${responseC.status}, or ${responseB.status}`);
       }
 
       const contentTypeG = responseG.headers.get("Content-Type") || "";
       const contentTypeC = responseC.headers.get("Content-Type") || "";
+      const contentTypeB = responseB.headers.get("Content-Type") || "";
 
-      if (!contentTypeG.includes("application/json") || !contentTypeC.includes("application/json")) {
+      if (!contentTypeG.includes("application/json") || !contentTypeC.includes("application/json") || !contentTypeB.includes("application/json")) {
         throw new Error("API server is starting up or returned HTML instead of JSON. Will retry...");
       }
 
       const resGuidelines = await responseG.json();
       const resCategories = await responseC.json();
+      const resBookmarks = await responseB.json();
 
       // Clean any standard legacy guidelines immediately
       const serverFiltered = Array.isArray(resGuidelines)
@@ -131,6 +134,30 @@ export default function App() {
       }
       if (Array.isArray(finalCategories)) {
         setCategories(finalCategories);
+      }
+
+      // Migrate local bookmarks to server if server is empty
+      const localBStr = localStorage.getItem("rams_bookmarks");
+      let localBookmarks = localBStr ? JSON.parse(localBStr) : [];
+      if (!Array.isArray(localBookmarks)) {
+        localBookmarks = [];
+      }
+
+      const hasBookmarksOnServer = Array.isArray(resBookmarks) && resBookmarks.length > 0;
+      let finalBookmarks = resBookmarks;
+
+      if (!hasBookmarksOnServer && localBookmarks.length > 0) {
+        await fetch("/api/bookmarks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bookmarkedIds: localBookmarks })
+        });
+        finalBookmarks = localBookmarks;
+      }
+
+      if (Array.isArray(finalBookmarks)) {
+        setBookmarkedIds(finalBookmarks);
+        localStorage.setItem("rams_bookmarks", JSON.stringify(finalBookmarks));
       }
 
       setIsLoadedFromServer(true);
@@ -217,11 +244,24 @@ export default function App() {
   };
 
   // Handle toggling of favorite states
-  const handleToggleBookmark = (id: string, e: React.MouseEvent) => {
+  const handleToggleBookmark = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setBookmarkedIds(prev => 
-      prev.includes(id) ? prev.filter(bId => bId !== id) : [...prev, id]
-    );
+    const updated = bookmarkedIds.includes(id) 
+      ? bookmarkedIds.filter(bId => bId !== id) 
+      : [...bookmarkedIds, id];
+    
+    setBookmarkedIds(updated);
+    localStorage.setItem("rams_bookmarks", JSON.stringify(updated));
+    
+    try {
+      await fetch("/api/bookmarks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookmarkedIds: updated })
+      });
+    } catch (err) {
+      console.error("Failed to persist bookmark to shared database:", err);
+    }
   };
 
   // Create new procedure card - write-through directly to server

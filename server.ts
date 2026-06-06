@@ -80,14 +80,15 @@ function loadSharedStore() {
   }
   const seed = {
     guidelines: DEFAULT_GUIDELINES,
-    categories: DEFAULT_CATEGORIES
+    categories: DEFAULT_CATEGORIES,
+    bookmarkedIds: []
   };
   saveSharedStore(seed);
   return seed;
 }
 
 // Helper to save shared data
-function saveSharedStore(data: { guidelines: any[]; categories: any[] }) {
+function saveSharedStore(data: any) {
   try {
     fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), "utf-8");
     return true;
@@ -148,10 +149,29 @@ app.post("/api/categories", (req, res) => {
   res.json(store.categories);
 });
 
+app.get("/api/bookmarks", (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  const store = loadSharedStore();
+  res.json(store.bookmarkedIds || []);
+});
+
+app.post("/api/bookmarks", (req, res) => {
+  const { bookmarkedIds } = req.body;
+  if (!Array.isArray(bookmarkedIds)) {
+    res.status(400).json({ error: "bookmarkedIds must be an array" });
+    return;
+  }
+  const store = loadSharedStore();
+  store.bookmarkedIds = bookmarkedIds;
+  saveSharedStore(store);
+  res.json(store.bookmarkedIds);
+});
+
 app.post("/api/reset", (req, res) => {
   const defaultStore = {
     guidelines: DEFAULT_GUIDELINES,
-    categories: DEFAULT_CATEGORIES
+    categories: DEFAULT_CATEGORIES,
+    bookmarkedIds: []
   };
   saveSharedStore(defaultStore);
   res.json({ success: true, ...defaultStore });
