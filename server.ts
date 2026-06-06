@@ -13,12 +13,37 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import fs from "fs";
+import { initializeApp } from "firebase/app";
+import { 
+  getFirestore, 
+  collection, 
+  getDocs, 
+  doc, 
+  getDoc, 
+  setDoc, 
+  deleteDoc 
+} from "firebase/firestore";
 
 const app = express();
 const PORT = 3000;
 
 // Middleware
 app.use(express.json());
+
+// Load Firebase configuration
+const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+let db: any = null;
+
+if (fs.existsSync(configPath)) {
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    const firebaseApp = initializeApp(config);
+    db = getFirestore(firebaseApp, config.firestoreDatabaseId);
+    console.log("✓ Centralized cloud Firestore client initialized successfully on backend.");
+  } catch (err: any) {
+    console.error("⚠️ Failed to initialize Firebase client SDK on backend. Falling back to local file. Error:", err.message || err);
+  }
+}
 
 // Default data seeds to instantiate on the shared backend if no store file exists.
 const DEFAULT_CATEGORIES = [
@@ -63,7 +88,7 @@ const DEFAULT_GUIDELINES: any[] = [];
 
 const STORE_PATH = path.join(process.cwd(), "db_shared_store.json");
 
-// Helper to load shared data
+// Helper to load shared data (Legacy fallback)
 function loadSharedStore() {
   try {
     if (fs.existsSync(STORE_PATH)) {
@@ -87,7 +112,7 @@ function loadSharedStore() {
   return seed;
 }
 
-// Helper to save shared data
+// Helper to save shared data (Legacy fallback)
 function saveSharedStore(data: any) {
   try {
     fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), "utf-8");
@@ -98,83 +123,281 @@ function saveSharedStore(data: any) {
   }
 }
 
+// --- Firebase Firestore API Operations & Error Handling ---
+
+enum OperationType {
+  CREATE = "create",
+  UPDATE = "update",
+  DELETE = "delete",
+  LIST = "list",
+  GET = "get",
+  WRITE = "write"
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: any[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: null,
+      email: null,
+      emailVerified: null,
+      isAnonymous: null,
+      tenantId: null,
+      providerInfo: []
+    },
+    operationType,
+    path
+  };
+  console.error("Firestore Error Detailed Logs:", JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+// 1. Guidelines
+async function getGuidelinesFromFirestore(): Promise<any[]> {
+  try {
+    if (!db) {
+      const store = loadSharedStore();
+      return store.guidelines || [];
+    }
+    const colRef = collection(db, "guidelines");
+    const snapshot = await getDocs(colRef);
+    const list: any[] = [];
+    snapshot.forEach((d) => {
+      list.push({ ...d.data() });
+    });
+    
+    // If database is empty, fallback to shared local file or empty
+    if (list.length === 0) {
+      const store = loadSharedStore();
+      if (store.guidelines && store.guidelines.length > 0) {
+        // Seed to Firestore in background
+        await saveGuidelinesToFirestore(store.guidelines);
+        return store.guidelines;
+      }
+    }
+    return list;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, "guidelines");
+    const store = loadSharedStore();
+    return store.guidelines || [];
+  }
+}
+
+async function saveGuidelinesToFirestore(guidelines: any[]) {
+  try {
+    // Also save to local backup file
+    const store = loadSharedStore();
+    store.guidelines = guidelines;
+    saveSharedStore(store);
+
+    if (!db) return;
+
+    // Direct write-through to Cloud Firestore
+    const colRef = collection(db, "guidelines");
+    const snapshot = await getDocs(colRef);
+    const existingIds = new Set<string>();
+    snapshot.forEach((d) => {
+      existingIds.add(d.id);
+    });
+
+    const activeIds = new Set(guidelines.map(g => g.id));
+    for (const g of guidelines) {
+      if (g && g.id) {
+        await setDoc(doc(db, "guidelines", g.id), g);
+      }
+    }
+
+    // Clean deleted records from firestore
+    for (const id of existingIds) {
+      if (!activeIds.has(id)) {
+        await deleteDoc(doc(db, "guidelines", id));
+      }
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, "guidelines");
+  }
+}
+
+// 2. Categories
+async function getCategoriesFromFirestore(): Promise<any[]> {
+  try {
+    if (!db) {
+      const store = loadSharedStore();
+      return store.categories || DEFAULT_CATEGORIES;
+    }
+    const colRef = collection(db, "categories");
+    const snapshot = await getDocs(colRef);
+    const list: any[] = [];
+    snapshot.forEach((d) => {
+      list.push({ ...d.data() });
+    });
+
+    if (list.length === 0) {
+      const store = loadSharedStore();
+      const initialCats = (store.categories && store.categories.length > 0) ? store.categories : DEFAULT_CATEGORIES;
+      await saveCategoriesToFirestore(initialCats);
+      return initialCats;
+    }
+    return list;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, "categories");
+    const store = loadSharedStore();
+    return store.categories || DEFAULT_CATEGORIES;
+  }
+}
+
+async function saveCategoriesToFirestore(categories: any[]) {
+  try {
+    const store = loadSharedStore();
+    store.categories = categories;
+    saveSharedStore(store);
+
+    if (!db) return;
+
+    const colRef = collection(db, "categories");
+    const snapshot = await getDocs(colRef);
+    const existingIds = new Set<string>();
+    snapshot.forEach((d) => {
+      existingIds.add(d.id);
+    });
+
+    const activeIds = new Set(categories.map(c => c.id));
+    for (const c of categories) {
+      if (c && c.id) {
+        await setDoc(doc(db, "categories", c.id), c);
+      }
+    }
+
+    for (const id of existingIds) {
+      if (!activeIds.has(id)) {
+        await deleteDoc(doc(db, "categories", id));
+      }
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, "categories");
+  }
+}
+
+// 3. Bookmarks
+async function getBookmarksFromFirestore(): Promise<string[]> {
+  try {
+    if (!db) {
+      const store = loadSharedStore();
+      return store.bookmarkedIds || [];
+    }
+    const docRef = doc(db, "metadata", "bookmarks");
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return docSnap.data().bookmarkedIds || [];
+    }
+    
+    // Seed from local if empty
+    const store = loadSharedStore();
+    const initialB = store.bookmarkedIds || [];
+    await saveBookmarksToFirestore(initialB);
+    return initialB;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, "metadata/bookmarks");
+    const store = loadSharedStore();
+    return store.bookmarkedIds || [];
+  }
+}
+
+async function saveBookmarksToFirestore(bookmarkedIds: string[]) {
+  try {
+    const store = loadSharedStore();
+    store.bookmarkedIds = bookmarkedIds;
+    saveSharedStore(store);
+
+    if (!db) return;
+    await setDoc(doc(db, "metadata", "bookmarks"), { bookmarkedIds });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, "metadata/bookmarks");
+  }
+}
+
 // API Endpoints for Guidelines and Categories
-app.get("/api/guidelines", (req, res) => {
+app.get("/api/guidelines", async (req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
-  const store = loadSharedStore();
-  res.json(store.guidelines || []);
+  const guidelines = await getGuidelinesFromFirestore();
+  res.json(guidelines);
 });
 
-app.post("/api/guidelines", (req, res) => {
+app.post("/api/guidelines", async (req, res) => {
   const { guidelines } = req.body;
   if (!Array.isArray(guidelines)) {
     res.status(400).json({ error: "guidelines must be an array" });
     return;
   }
-  const store = loadSharedStore();
-  store.guidelines = guidelines;
-  saveSharedStore(store);
-  res.json(store.guidelines);
+  await saveGuidelinesToFirestore(guidelines);
+  res.json(guidelines);
 });
 
 // Sync both lists simultaneously in a single transaction if needed
-app.post("/api/sync-both", (req, res) => {
+app.post("/api/sync-both", async (req, res) => {
   const { guidelines, categories } = req.body;
-  const store = loadSharedStore();
   if (Array.isArray(guidelines)) {
-    store.guidelines = guidelines;
+    await saveGuidelinesToFirestore(guidelines);
   }
   if (Array.isArray(categories)) {
-    store.categories = categories;
+    await saveCategoriesToFirestore(categories);
   }
-  saveSharedStore(store);
-  res.json({ success: true, guidelines: store.guidelines, categories: store.categories });
+  const currentG = await getGuidelinesFromFirestore();
+  const currentC = await getCategoriesFromFirestore();
+  res.json({ success: true, guidelines: currentG, categories: currentC });
 });
 
-app.get("/api/categories", (req, res) => {
+app.get("/api/categories", async (req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
-  const store = loadSharedStore();
-  res.json(store.categories || DEFAULT_CATEGORIES);
+  const categories = await getCategoriesFromFirestore();
+  res.json(categories || DEFAULT_CATEGORIES);
 });
 
-app.post("/api/categories", (req, res) => {
+app.post("/api/categories", async (req, res) => {
   const { categories } = req.body;
   if (!Array.isArray(categories)) {
     res.status(400).json({ error: "categories must be an array" });
     return;
   }
-  const store = loadSharedStore();
-  store.categories = categories;
-  saveSharedStore(store);
-  res.json(store.categories);
+  await saveCategoriesToFirestore(categories);
+  res.json(categories);
 });
 
-app.get("/api/bookmarks", (req, res) => {
+app.get("/api/bookmarks", async (req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
-  const store = loadSharedStore();
-  res.json(store.bookmarkedIds || []);
+  const bookmarks = await getBookmarksFromFirestore();
+  res.json(bookmarks || []);
 });
 
-app.post("/api/bookmarks", (req, res) => {
+app.post("/api/bookmarks", async (req, res) => {
   const { bookmarkedIds } = req.body;
   if (!Array.isArray(bookmarkedIds)) {
     res.status(400).json({ error: "bookmarkedIds must be an array" });
     return;
   }
-  const store = loadSharedStore();
-  store.bookmarkedIds = bookmarkedIds;
-  saveSharedStore(store);
-  res.json(store.bookmarkedIds);
+  await saveBookmarksToFirestore(bookmarkedIds);
+  res.json(bookmarkedIds);
 });
 
-app.post("/api/reset", (req, res) => {
-  const defaultStore = {
-    guidelines: DEFAULT_GUIDELINES,
-    categories: DEFAULT_CATEGORIES,
-    bookmarkedIds: []
-  };
-  saveSharedStore(defaultStore);
-  res.json({ success: true, ...defaultStore });
+app.post("/api/reset", async (req, res) => {
+  await saveGuidelinesToFirestore([]);
+  await saveCategoriesToFirestore(DEFAULT_CATEGORIES);
+  await saveBookmarksToFirestore([]);
+  res.json({ success: true, guidelines: [], categories: DEFAULT_CATEGORIES, bookmarkedIds: [] });
 });
 
 // Lazy-initialize Gemini SDK to prevent server crash if key is missing
