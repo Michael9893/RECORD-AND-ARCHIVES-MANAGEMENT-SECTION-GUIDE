@@ -499,6 +499,96 @@ export default function App() {
             // Default Dashboard View Layout
             <div id="dashboard-viewport" className="p-4 lg:p-6 space-y-6 max-w-7xl mx-auto w-full flex-1">
               
+              {/* 👥 REAL-TIME MULTI-USER WORKFLOW WALKTHROUGH */}
+              <div id="scenario-walkthrough-panel" className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl border border-indigo-100 p-5 shadow-sm space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-indigo-100/60 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-600 border border-indigo-500 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                      👥
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-bold text-indigo-900 uppercase tracking-wider font-mono">
+                        Multi-User Real-Time Simulator Walkthrough
+                      </h3>
+                      <p className="text-[11px] text-indigo-700 mt-0.5">
+                        Follow these simple steps side-by-side to verify immediate, persistent synchronization between ACCOUNT A and ACCOUNT B.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </span>
+                    <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded font-bold uppercase tracking-wide">
+                      Live Server Connection Active
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-sans">
+                  {/* Account A Column */}
+                  <div className="bg-white p-4 rounded-xl border border-indigo-100 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono font-bold text-red-600 bg-red-50 border border-red-100 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                        💻 Tab 1: ACCOUNT A (Admin)
+                      </span>
+                      {currentRole !== "ADMIN" ? (
+                        <button
+                          id="btn-quick-admin-switch"
+                          onClick={() => setCurrentRole("ADMIN")}
+                          className="text-[10px] text-red-600 hover:bg-red-50 bg-white border border-red-200 rounded px-2 py-0.5 font-bold cursor-pointer transition-all hover:scale-105"
+                          type="button"
+                        >
+                          Switch to Admin
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-red-500 font-semibold font-mono">
+                          ★ Currently Active
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-slate-650 text-[11px] leading-relaxed">
+                      This represents files or policies added by division executives:
+                    </p>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-500 text-[11px] pl-1">
+                      <li>Ensure active role in the sidebar says <strong className="text-slate-700">ADMIN</strong>.</li>
+                      <li>Click the black <strong className="text-indigo-600 font-semibold">+ Add Guideline</strong> button on this dashboard.</li>
+                      <li>Submit key steps & criteria for a procedural card (e.g. <em className="text-slate-800">"Office Climate Audit"</em>).</li>
+                    </ol>
+                  </div>
+
+                  {/* Account B Column */}
+                  <div className="bg-white p-4 rounded-xl border border-indigo-100 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                        🕶️ Tab 2: ACCOUNT B (Incognito Viewer)
+                      </span>
+                      <button
+                        id="btn-quick-copy-url"
+                        onClick={() => {
+                          const appUrl = window.location.href;
+                          navigator.clipboard.writeText(appUrl);
+                          alert("App URL copied to clipboard! Open a brand new Incognito Browser window, paste the URL, and watch guidelines fetch live and update in real-time.");
+                        }}
+                        className="text-[10px] text-indigo-600 hover:bg-indigo-50 bg-white border border-indigo-200 rounded px-2 py-0.5 font-semibold cursor-pointer transition-all flex items-center gap-1 hover:scale-105"
+                        type="button"
+                      >
+                        Copy App URL
+                      </button>
+                    </div>
+                    <p className="text-slate-650 text-[11px] leading-relaxed">
+                      Representing standard division visitors accessing the platform:
+                    </p>
+                    <ul className="list-decimal list-inside space-y-1 text-slate-500 text-[11px] pl-1">
+                      <li>Open a new <strong className="text-indigo-600">Incognito / Private</strong> window.</li>
+                      <li>Paste the App's URL. It defaults securely to <strong className="text-slate-700">VIEWER</strong> mode.</li>
+                      <li>Watch the guideline card you created on ACCOUNT A appear instantly (<strong className="text-emerald-600">no reload required!</strong>) and stay persisted!</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
               {/* Bento Grid Layout Section */}
               <section id="bento-dashboard-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 
