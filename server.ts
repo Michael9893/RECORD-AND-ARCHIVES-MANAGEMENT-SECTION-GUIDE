@@ -45,69 +45,33 @@ const PORT = 3000;
 app.use(express.json());
 
 // Default data seeds to instantiate on the shared backend if no store file exists.
-const DEFAULT_CATEGORIES = [
-  {
-    id: "physical-archiving",
-    name: "Physical Archiving & Intake",
-    description: "Procedures for cataloging, packing, indexing, and storing hard-copy files safely in the storage facility.",
-    iconName: "Archive",
-    colorClass: "bg-amber-100 text-amber-800 border-amber-200"
-  },
-  {
-    id: "digital-ingestion",
-    name: "Digital Ingestion & OCR",
-    description: "Instructions for high-resolution document scanning, optical character recognition (OCR), metadata mapping, and digital repository storage.",
-    iconName: "FileDigit",
-    colorClass: "bg-blue-100 text-blue-800 border-blue-200"
-  },
-  {
-    id: "compliance-retention",
-    name: "Compliance & FOI Requests",
-    description: "Rules for legal retention calendars, personal data (PII) redaction, and Freedom of Information disclosure protocols.",
-    iconName: "ShieldAlert",
-    colorClass: "bg-violet-100 text-violet-800 border-violet-200"
-  },
-  {
-    id: "disposal-destruction",
-    name: "Secure Disposal & Shredding",
-    description: "Approved pipelines for destroying expired files safely, dual-witness sign-offs, and updating the Destruction Register.",
-    iconName: "Trash2",
-    colorClass: "bg-rose-100 text-rose-800 border-rose-200"
-  },
-  {
-    id: "vault-integrity",
-    name: "Vault Climate & Security",
-    description: "Atmospheric guidelines, humidity levels, access authorization logs, and fire prevention codes inside the core vaults.",
-    iconName: "Warehouse",
-    colorClass: "bg-emerald-100 text-emerald-800 border-emerald-200"
-  }
-];
+const DEFAULT_CATEGORIES: any[] = [];
 
 const DEFAULT_GUIDELINES: any[] = [
   {
     id: "gd-vlt-101",
-    title: "Vault Intake & Physical Tagging Protocol",
-    description: "Standard operating procedures for registering incoming physical documents, applying unique barcode tags, and registering safe shelving vault coordinates.",
-    category: "physical-archiving",
+    title: "Official Mail Dispatch & Courier Routing Protocol",
+    description: "Guiding records officers through bulk envelope sorting, courier dispatch logging, and tracking official intra-agency messengerial rounds.",
+    category: "messengerial-services",
     steps: [
-      "Inspect the physical dossier file for paper contamination or transport damage.",
-      "Recheck dossier index keys against the sender physical manifestation sheet.",
-      "Generate and print a unique 3-of-9 symbology barcode label containing the dossier ID.",
-      "Affix the barcode label firmly onto the upper-right corner of the physical dossier cover.",
-      "Move the folder to its allotted secure shelving unit (Vault B, Bay 4, Shelf 12) and record coordinates in the ledger."
+      "Sort incoming physical envelopes and parcels by division codes and urgent flags.",
+      "Scan existing tracking barcodes or attach a custom RAMS transmission slip.",
+      "Register package sender details and department routing paths in the dispatch book.",
+      "Assign urgent items to designated runners or local official courier riders.",
+      "Obtain recipient digital or ink signatures on completion slips and log into the system."
     ],
     imageUrls: ["https://images.unsplash.com/photo-1568667256549-094345857637?auto=format&fit=crop&q=80&w=800"],
     videoUrls: ["https://www.w3schools.com/html/mov_bbb.mp4"],
     attachments: [
-      { name: "Safe_Vault_Shelving_Coordinates.pdf", url: "#", size: "240 KB" },
-      { name: "Dossier_Intake_Audit_Sheet.csv", url: "#", size: "45 KB" }
+      { name: "Priority_Mail_Dispatch_Log.pdf", url: "#", size: "180 KB" },
+      { name: "Official_Delivery_Receipt.docx", url: "#", size: "42 KB" }
     ],
     flowchart: [
-      { id: "v1-start", label: "Inspect Paper Delivery Integrity", type: "start" },
-      { id: "v1-manifest", label: "Verify Manifest with Delivery Ledger", type: "process" },
-      { id: "v1-decide", label: "Dossier Integrity Verified?", type: "decision" },
-      { id: "v1-quarantine", label: "Log quarantine / Send File rejection slip", type: "end" },
-      { id: "v1-db-log", label: "Affix Barcode, Shelter in Vault Shelving", type: "end" }
+      { id: "v1-start", label: "Inspect Parcel & Mail Deliveries", type: "start" },
+      { id: "v1-manifest", label: "Verify Manifest with Route Dispatch Sheet", type: "process" },
+      { id: "v1-decide", label: "Urgent Priority flag present?", type: "decision" },
+      { id: "v1-quarantine", label: "Route as standard bulk mail delivery", type: "end" },
+      { id: "v1-db-log", label: "Assign to Runner rider for immediate dispatch", type: "end" }
     ],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()

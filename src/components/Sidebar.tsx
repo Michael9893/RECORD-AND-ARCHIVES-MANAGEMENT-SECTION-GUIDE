@@ -17,7 +17,9 @@ import {
   Shield, 
   Sparkles,
   FileText,
-  Layers
+  Layers,
+  Send,
+  Mail
 } from "lucide-react";
 import { Category, Guideline, UserRole } from "../types";
 import BrandLogo from "./BrandLogo";
@@ -59,6 +61,10 @@ export const CategoryIcon = ({ name, className }: { name: string; className?: st
       return <Search className={className} />;
     case "Bookmark":
       return <Bookmark className={className} />;
+    case "Send":
+      return <Send className={className} />;
+    case "Mail":
+      return <Mail className={className} />;
     default:
       return <FileText className={className} />;
   }

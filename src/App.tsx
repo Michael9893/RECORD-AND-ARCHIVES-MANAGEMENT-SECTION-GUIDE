@@ -115,14 +115,25 @@ export default function App() {
           cList.push(doc.data() as Category);
         });
 
-        if (cList.length === 0) {
-          console.log("Firestore empty. Seeding categories to Cloud...");
+        const DEFAULT_IDS_TO_REMOVE = [
+          "messengerial-services", 
+          "digital-ingestion", 
+          "compliance-retention", 
+          "disposal-destruction", 
+          "vault-integrity", 
+          "physical-archiving",
+          "issuances"
+        ];
+        const foundDefaults = cList.filter(c => DEFAULT_IDS_TO_REMOVE.includes(c.id));
+
+        if (foundDefaults.length > 0) {
+          console.log("Removing pre-existing default categories from Firestore...");
           try {
-            for (const item of INITIAL_CATEGORIES) {
-              await setDoc(doc(db, "categories", item.id), item);
+            for (const cat of foundDefaults) {
+              await deleteDoc(doc(db, "categories", cat.id));
             }
           } catch (e) {
-            console.error("Failed to seed categories to Firestore:", e);
+            console.error("Failed to clear pre-existing categories:", e);
           }
         } else {
           setCategories(cList);

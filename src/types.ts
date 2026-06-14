@@ -33,7 +33,7 @@ export interface Guideline {
   id: string;
   title: string;
   description: string;
-  category: string; // e.g., 'Physical Archiving', 'Digital Ingestion', 'Compliance & Retention', 'Disposal'
+  category: string; // e.g., 'Messengerial Services', 'Digital Ingestion', 'Compliance & Retention', 'Disposal'
   steps: string[];
   imageUrls: string[];
   videoUrls: string[];
